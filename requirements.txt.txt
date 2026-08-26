@@ -1,0 +1,4 @@
+rubika
+Pillow
+arabic-reshaper
+python-bidi
