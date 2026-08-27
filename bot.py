@@ -32,7 +32,7 @@ def save_products(products):
 # 🤖 تنظیمات اولیه
 # ============================================================
 
-TOKEN = "CBGCEJ0CMIHQLEUZVQPJZCNPKWTXNBPPAUVPBGBIYZIEQLOJFPHPLYGRNBZUZVHI"
+TOKEN = ""
 BOT_USERNAME = "FroghiShopBot"
 ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 
