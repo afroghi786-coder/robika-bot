@@ -2,8 +2,8 @@
 # 🤖 ربات فروشگاهی - نسخه نهایی با جستجوی زنده
 # ============================================================
 
-from rubika import Robot, Message
-from rubika.keypad import ChatKeypadBuilder
+from rubka import Robot, Message
+from rubka.keypad import ChatKeypadBuilder
 import re
 import os
 from datetime import datetime
