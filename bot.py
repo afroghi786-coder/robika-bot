@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با جستجوی زنده
+# 🤖 ربات فروشگاهی - نسخه نهایی با ذخیره‌سازی و به‌روزرسانی قیمت
 # ============================================================
 
 from rubka import Robot, Message
@@ -10,25 +10,44 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
+import json
 
-TOKEN = "CBGCEJ0CMIHQLEUZVQPJZCNPKWTXNBPPAUVPBGBIYZIEQLOJFPHPLYGRNBZUZVHI"
+# ============================================================
+# 📦 ذخیره‌سازی دائمی محصولات (با قابلیت به‌روزرسانی قیمت)
+# ============================================================
+
+PRODUCTS_FILE = "products.json"
+
+def load_products():
+    if os.path.exists(PRODUCTS_FILE):
+        with open(PRODUCTS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+def save_products(products):
+    with open(PRODUCTS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(products, f, ensure_ascii=False, indent=2)
+
+# ============================================================
+# 🤖 تنظیمات اولیه
+# ============================================================
+
+TOKEN = ""
 BOT_USERNAME = "FroghiShopBot"
-
-ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"  # شناسه چت حسابدار
+ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 
 # ============================================================
 # 📦 حافظه
 # ============================================================
 
-all_products = []
+all_products = load_products()  # ← بارگذاری از فایل
 carts = {}
 customer_debts = {}
 customer_codes = {}
 invoice_counter = 0
 customer_counter = 3000
-last_invoice_for_admin = {}  # {user_id: {'message_id': ..., 'chat_id': ..., 'user_name': ...}}
+last_invoice_for_admin = {}
 
-# حروف فارسی برای کیپد جستجو
 PERSIAN_LETTERS = [
     'ا', 'ب', 'پ', 'ت', 'ث', 'ج', 'چ', 'ح', 'خ', 'د', 'ذ', 'ر', 'ز', 'ژ',
     'س', 'ش', 'ص', 'ض', 'ط', 'ظ', 'ع', 'غ', 'ف', 'ق', 'ک', 'گ', 'ل', 'م',
@@ -43,7 +62,7 @@ def get_cart(user_id):
             'step': 'idle',
             'selected_product': None,
             'customer': {},
-            'search_query': ''  # عبارت جستجوی فعلی کاربر
+            'search_query': ''
         }
     return carts[user_id]
 
@@ -91,7 +110,6 @@ def detect_product(text):
     return {'name': name, 'price': price, 'pairCount': pair_count}
 
 def extract_amount(text):
-    """استخراج مبلغ از متن"""
     if not text:
         return None
     text_clean = re.sub(r'[٬,/]', '', text)
@@ -286,7 +304,6 @@ async def show_products_list(message: Message, user_id: str):
         await message.reply("❌ هنوز محصولی در فروشگاه ثبت نشده است.")
         return
     
-    cart = get_cart(user_id)
     text = "📦 **لیست محصولات:**\n\n"
     for i, product in enumerate(all_products, 1):
         text += f"{i}. {product['name']}\n"
@@ -317,10 +334,8 @@ async def show_search_keypad(message: Message, user_id: str, bot: Robot):
     cart = get_cart(user_id)
     query = cart.get('search_query', '')
     
-    # ساخت کیپد الفبایی
     keypad_builder = ChatKeypadBuilder()
     
-    # حروف فارسی - هر ردیف ۴ حرف
     row = []
     for i, letter in enumerate(PERSIAN_LETTERS):
         row.append(ChatKeypadBuilder().button(id=f"search_letter_{letter}", text=letter))
@@ -330,13 +345,11 @@ async def show_search_keypad(message: Message, user_id: str, bot: Robot):
     if row:
         keypad_builder.row(*row)
     
-    # اعداد
     num_row = []
     for num in NUMBERS:
         num_row.append(ChatKeypadBuilder().button(id=f"search_letter_{num}", text=num))
     keypad_builder.row(*num_row)
     
-    # دکمه‌های عملیاتی
     keypad_builder.row(
         ChatKeypadBuilder().button(id="search_backspace", text="⌫"),
         ChatKeypadBuilder().button(id="search_clear", text="🗑️ پاک کردن"),
@@ -345,21 +358,17 @@ async def show_search_keypad(message: Message, user_id: str, bot: Robot):
     
     keypad = keypad_builder.build()
     
-    # نمایش متن جستجو
     search_text = f"🔍 **جستجوی محصولات**\n\nعبارت جستجو: `{query}`\n\n" if query else "🔍 **جستجوی محصولات**\n\nلطفاً حروف را انتخاب کنید.\n"
     
-    # فیلتر محصولات بر اساس عبارت جستجو
     filtered = [p for p in all_products if query.lower() in p['name'].lower()] if query else []
     
     if filtered:
         search_text += f"\n✅ {len(filtered)} محصول پیدا شد:\n"
-        # نمایش ۱۰ محصول اول با دکمه انتخاب
         for i, prod in enumerate(filtered[:10]):
             search_text += f"{i+1}. {prod['name']} - {format_price(prod['price'])} تومان\n"
         if len(filtered) > 10:
             search_text += f"\nو {len(filtered)-10} محصول دیگر ..."
         
-        # دکمه‌های انتخاب محصول (برای محصولات فیلتر شده)
         prod_keypad_builder = ChatKeypadBuilder()
         for prod in filtered[:10]:
             prod_keypad_builder.row(
@@ -377,7 +386,6 @@ async def show_search_keypad(message: Message, user_id: str, bot: Robot):
             )
         prod_keypad = prod_keypad_builder.build()
         
-        # ارسال پیام با دکمه‌های محصولات
         await bot.send_message(
             chat_id=message.chat_id,
             text=search_text,
@@ -429,7 +437,6 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     total_payable = previous_debt + total
     invoice_number = generate_invoice_number()
     
-    # ارسال فاکتور به مشتری
     try:
         image_path = create_invoice_image(
             customer=customer,
@@ -451,7 +458,6 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
         await message.reply("⚠️ خطا در تولید فاکتور، لطفاً دوباره تلاش کنید.")
         return
     
-    # ارسال فاکتور به حسابدار
     try:
         image_path = create_invoice_image(
             customer=customer,
@@ -520,28 +526,35 @@ async def handle_message(bot: Robot, message: Message):
     print(f"📩 پیام از: {chat_id}")
     print(f"📝 متن: {text[:100] if text else '(خالی)'}")
     
-    # ===== پیام از کانال =====
     if chat_id.startswith('c0'):
         product = detect_product(text)
         if not product:
             print("❌ محصول تشخیص داده نشد!")
             return
         
-        exists = any(p['name'] == product['name'] for p in all_products)
-        if not exists:
+        # ✅ بخش جدید: به‌روزرسانی قیمت در صورت تکراری بودن
+        found = False
+        for i, p in enumerate(all_products):
+            if p['name'] == product['name']:
+                # به‌روزرسانی قیمت و تعداد جفت
+                all_products[i]['price'] = product['price']
+                all_products[i]['pairCount'] = product.get('pairCount', 0)
+                save_products(all_products)
+                print(f"🔄 قیمت محصول {product['name']} به {format_price(product['price'])} تومان به‌روز شد!")
+                found = True
+                break
+        
+        if not found:
             all_products.append(product)
-            print(f"✅ محصول جدید: {product['name']} - قیمت: {product['price']}")
-        else:
-            print(f"ℹ️ محصول {product['name']} قبلاً وجود دارد")
+            save_products(all_products)
+            print(f"✅ محصول جدید: {product['name']} - قیمت: {format_price(product['price'])}")
         
         await send_link_to_channel(chat_id, product)
         return
     
-    # ===== پیام از چت خصوصی =====
     if chat_id.startswith('b0'):
         cart = get_cart(user_id)
         
-        # 1️⃣ منوی اصلی
         if text == '/start' or text == 'start':
             menu_keypad = ChatKeypadBuilder() \
                 .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
@@ -559,7 +572,6 @@ async def handle_message(bot: Robot, message: Message):
             await message.reply(f"🆔 **آیدی عددی شما:**\n`{user_id}`\n\n🔹 شناسه چت شما: `{chat_id}`")
             return
         
-        # 2️⃣ دریافت تعداد کارتن
         if cart['step'] == 'waiting_quantity':
             try:
                 quantity = int(convert_persian_number(text))
@@ -583,11 +595,9 @@ async def handle_message(bot: Robot, message: Message):
             if success:
                 cart['step'] = 'idle'
                 cart['selected_product'] = None
-                # بعد از سفارش، دوباره لیست محصولات را نشان بده
                 await show_products_list(message, user_id)
             return
         
-        # 3️⃣ دریافت اطلاعات مشتری
         if cart['step'] == 'waiting_customer_name':
             cart['customer']['name'] = text
             cart['step'] = 'waiting_customer_phone'
@@ -616,11 +626,6 @@ async def handle_message(bot: Robot, message: Message):
             await finalize_order(message, user_id, bot)
             return
         
-        # ============================================
-        # ✅ پردازش تسویه حساب (وقتی کاربر در مرحله‌ای نیست)
-        # ============================================
-        
-        # اگر پیام از حسابدار است
         if chat_id == ADMIN_CHAT_ID:
             print(f"🔍 پیام از حسابدار با reply_to_message_id: {message.reply_to_message_id}")
             
@@ -667,7 +672,6 @@ async def handle_message(bot: Robot, message: Message):
                 await message.reply("📋 برای تایید تراکنش، روی فاکتور مورد نظر ریپلای بزنید و مبلغ را وارد کنید.")
                 return
         
-        # اگر پیام از مشتری است
         else:
             amount = extract_amount(text)
             if amount and user_id in last_invoice_for_admin:
@@ -688,8 +692,6 @@ async def handle_message(bot: Robot, message: Message):
                     await message.reply("⚠️ خطا در ارسال پیامک به حسابدار. لطفاً دوباره تلاش کنید.")
                 return
             else:
-                # اگر پیام عادی است و کاربر در مرحله‌ای نیست، شاید جستجو باشد!
-                # اما ما جستجو را با دکمه انجام می‌دهیم، پس پیام عادی را نادیده می‌گیریم
                 await message.reply(
                     "📋 **منوی اصلی:**\n"
                     "از دکمه‌های زیر استفاده کنید.\n"
@@ -709,9 +711,6 @@ async def handle_callback(bot: Robot, message: Message):
     
     cart = get_cart(user_id)
     
-    # ============================================
-    # 🔍 جستجو
-    # ============================================
     if data == 'search':
         cart['search_query'] = ''
         await show_search_keypad(message, user_id, bot)
@@ -735,7 +734,6 @@ async def handle_callback(bot: Robot, message: Message):
     
     if data == 'search_exit':
         cart['search_query'] = ''
-        # برگشت به منوی اصلی
         menu_keypad = ChatKeypadBuilder() \
             .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
             .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
@@ -746,7 +744,6 @@ async def handle_callback(bot: Robot, message: Message):
         return
     
     if data == 'search_show_more':
-        # نمایش همه محصولات فیلتر شده
         query = cart.get('search_query', '')
         filtered = [p for p in all_products if query.lower() in p['name'].lower()] if query else []
         if filtered:
@@ -756,7 +753,7 @@ async def handle_callback(bot: Robot, message: Message):
             text += "\nبرای سفارش، روی دکمه محصول کلیک کنید."
             
             keypad_builder = ChatKeypadBuilder()
-            for prod in filtered[:20]:  # حداکثر ۲۰ دکمه
+            for prod in filtered[:20]:
                 keypad_builder.row(
                     ChatKeypadBuilder().button(
                         id=f"select_{prod['name']}",
@@ -770,16 +767,10 @@ async def handle_callback(bot: Robot, message: Message):
             await message.reply("❌ هیچ محصولی یافت نشد.")
         return
     
-    # ============================================
-    # نمایش لیست محصولات
-    # ============================================
     if data == 'show_products':
         await show_products_list(message, user_id)
         return
     
-    # ============================================
-    # انتخاب محصول (از لیست عادی یا جستجو)
-    # ============================================
     if data.startswith('select_'):
         product_name = data.replace('select_', '')
         product = next((p for p in all_products if p['name'] == product_name), None)
@@ -796,9 +787,6 @@ async def handle_callback(bot: Robot, message: Message):
         )
         return
     
-    # ============================================
-    # سبد خرید
-    # ============================================
     if data == 'show_cart':
         if len(cart['items']) == 0:
             await message.reply("🛒 سبد خرید شما خالی است!")
@@ -830,20 +818,13 @@ async def handle_callback(bot: Robot, message: Message):
         await message.reply_keypad(text, keypad)
         return
     
-    # ============================================
-    # حذف از سبد
-    # ============================================
     if data.startswith('remove_'):
         product_name = data.replace('remove_', '')
         cart['items'] = [item for item in cart['items'] if item['name'] != product_name]
         await message.reply(f"🗑️ {product_name} از سبد خرید حذف شد.")
-        # نمایش مجدد سبد
-        await handle_callback(bot, message)  # با data='show_cart' کار نمیکنه، پس خودش رو صدا می‌زنیم
+        await handle_callback(bot, message)
         return
     
-    # ============================================
-    # خالی کردن سبد
-    # ============================================
     if data == 'clear_cart':
         cart['items'] = []
         await message.reply("🗑️ سبد خرید شما خالی شد.")
@@ -856,9 +837,6 @@ async def handle_callback(bot: Robot, message: Message):
         await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
         return
     
-    # ============================================
-    # نهایی‌سازی
-    # ============================================
     if data == 'checkout':
         if len(cart['items']) == 0:
             await message.reply("❌ سبد خرید خالی است!")
@@ -871,9 +849,6 @@ async def handle_callback(bot: Robot, message: Message):
         )
         return
     
-    # ============================================
-    # برگشت به منو
-    # ============================================
     if data == 'back_menu':
         menu_keypad = ChatKeypadBuilder() \
             .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
@@ -884,9 +859,6 @@ async def handle_callback(bot: Robot, message: Message):
         await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
         return
     
-    # ============================================
-    # راهنما
-    # ============================================
     if data == 'help':
         await message.reply(
             "📋 **راهنمای فروشگاه:**\n\n"
