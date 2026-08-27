@@ -1,4 +1,4 @@
-rubika
+rubka
 Pillow
 arabic-reshaper
 python-bidi
