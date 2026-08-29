@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با ثبت در گوگل‌شیت + تسویه مرحله‌ای
+# 🤖 ربات فروشگاهی - نسخه نهایی با Webhook گوگل‌شیت
 # ============================================================
 
 from rubka import Robot, Message
@@ -13,8 +13,7 @@ from bidi.algorithm import get_display
 import json
 import threading
 from flask import Flask, request, jsonify
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import requests
 
 # ============================================================
 # 📦 ذخیره‌سازی دائمی محصولات
@@ -41,106 +40,60 @@ BOT_USERNAME = "FroghiShopBot"
 ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 
 # ============================================================
-# 📊 تنظیمات گوگل‌شیت
+# 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-SHEET_ID = "شناسه_شیت_خود_را_اینجا_وارد_کنید"  # ← شناسه فایل گوگل‌شیت
-
-def get_google_client():
-    """اتصال به گوگل‌شیت"""
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-    return gspread.authorize(creds)
-
-def get_or_create_sheet():
-    """دریافت شیت 'فروش' یا ایجاد آن"""
-    client = get_google_client()
-    sh = client.open_by_key(SHEET_ID)
-    try:
-        sheet = sh.worksheet("فروش")
-    except:
-        sheet = sh.add_worksheet(title="فروش", rows=1, cols=13)
-        # اضافه کردن هدر
-        headers = [
-            "تاریخ ثبت", "شماره فاکتور", "کد مشتری", "نام مشتری",
-            "تلفن مشتری", "آدرس", "باربری", "مبلغ کل سفارش",
-            "محصولات", "وضعیت واریزی", "تاریخ آخرین واریزی",
-            "مبلغ کل واریزی", "بدهی باقی‌مانده"
-        ]
-        sheet.append_row(headers)
-    return sheet
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxJWgsLfvoPoyGoUKf-Xl0exib1jcF27z3B29mWjoAxaK95HgsSvU_zD9zUQQal8HUibA/exec"  # ← آدرس Webhook خود را اینجا قرار دهید
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
-    """ثبت اولیه سفارش با وضعیت 'در انتظار واریزی'"""
+    """ارسال سفارش به Webhook گوگل‌شیت"""
     try:
-        sheet = get_or_create_sheet()
-        row = [
-            datetime.now().strftime('%Y/%m/%d %H:%M'),  # تاریخ ثبت
-            invoice_number,                             # شماره فاکتور
-            customer_code,                              # کد مشتری
-            customer.get('name', ''),                   # نام مشتری
-            customer.get('phone', ''),                  # تلفن مشتری
-            customer.get('address', ''),                # آدرس
-            customer.get('shipping', ''),               # باربری
-            total,                                      # مبلغ کل سفارش
-            ', '.join([f"{item['name']} (x{item['quantity']})" for item in items]),  # محصولات
-            'در انتظار واریزی',                         # وضعیت واریزی
-            '',                                         # تاریخ آخرین واریزی
-            0,                                          # مبلغ کل واریزی
-            total                                       # بدهی باقی‌مانده
-        ]
-        sheet.append_row(row)
-        print(f"✅ سفارش {invoice_number} در گوگل‌شیت ثبت شد.")
-        return True
+        payload = {
+            "action": "register",
+            "timestamp": datetime.now().isoformat(),
+            "invoice_number": invoice_number,
+            "customer_code": customer_code,
+            "customer_name": customer.get('name', ''),
+            "customer_phone": customer.get('phone', ''),
+            "customer_address": customer.get('address', ''),
+            "customer_shipping": customer.get('shipping', ''),
+            "total": total,
+            "products": ', '.join([f"{item['name']} (x{item['quantity']})" for item in items]),
+            "payment_status": "در انتظار واریزی",
+            "last_payment_date": "",
+            "total_paid": 0,
+            "remaining_debt": total
+        }
+        response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            print(f"✅ سفارش {invoice_number} در گوگل‌شیت ثبت شد.")
+            return True
+        else:
+            print(f"⚠️ خطا در ثبت: {response.text}")
+            return False
     except Exception as e:
         print(f"❌ خطا در ثبت سفارش: {e}")
         return False
 
-def به‌روزرسانی_واریزی_در_شیت(invoice_number, مبلغ_واریزی):
-    """به‌روزرسانی مبلغ واریزی و بدهی باقی‌مانده برای یک فاکتور"""
+def به‌روزرسانی_واریزی_در_شیت(invoice_number, payment_amount):
+    """ارسال درخواست به‌روزرسانی واریزی به Webhook"""
     try:
-        sheet = get_or_create_sheet()
-        records = sheet.get_all_values()
-        if len(records) < 2:
-            return False, "❌ فاکتوری پیدا نشد."
-
-        # پیدا کردن ردیف مربوط به شماره فاکتور
-        target_row = None
-        for i, row in enumerate(records):
-            if i == 0: continue  # رد شدن از هدر
-            if row[1] == invoice_number:  # ستون B = شماره فاکتور
-                target_row = i + 1  # ردیف در گوگل‌شیت (1-based)
-                break
-
-        if not target_row:
-            return False, f"❌ فاکتور {invoice_number} در شیت پیدا نشد."
-
-        # خواندن مقادیر فعلی
-        مبلغ_کل_سفارش = float(records[target_row-1][7])  # ستون H
-        مبلغ_کل_واریزی = float(records[target_row-1][11]) if records[target_row-1][11] else 0
-        بدهی_قبلی = float(records[target_row-1][12]) if records[target_row-1][12] else 0
-
-        # محاسبه جدید
-        مبلغ_کل_واریزی_جدید = مبلغ_کل_واریزی + مبلغ_واریزی
-        بدهی_جدید = مبلغ_کل_سفارش - مبلغ_کل_واریزی_جدید
-
-        # تعیین وضعیت جدید
-        if بدهی_جدید <= 0:
-            وضعیت = "تسویه کامل"
-            بدهی_جدید = 0
+        payload = {
+            "action": "update_payment",
+            "invoice_number": invoice_number,
+            "payment_amount": payment_amount
+        }
+        response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("status") == "success":
+                print(f"✅ واریزی {invoice_number} به‌روزرسانی شد.")
+                return True, result.get("message", "")
+            else:
+                return False, result.get("message", "❌ خطا در به‌روزرسانی")
         else:
-            وضعیت = "پرداخت جزیی"
-
-        # به‌روزرسانی ردیف
-        sheet.update_cell(target_row, 10, وضعیت)          # ستون J = وضعیت واریزی
-        sheet.update_cell(target_row, 11, datetime.now().strftime('%Y/%m/%d %H:%M'))  # ستون K = تاریخ آخرین واریزی
-        sheet.update_cell(target_row, 12, مبلغ_کل_واریزی_جدید)  # ستون L = مبلغ کل واریزی
-        sheet.update_cell(target_row, 13, بدهی_جدید)      # ستون M = بدهی باقی‌مانده
-
-        print(f"✅ واریزی {invoice_number} به‌روزرسانی شد. بدهی جدید: {بدهی_جدید}")
-        return True, f"✅ واریزی ثبت شد. بدهی باقی‌مانده: {بدهی_جدید:,.0f} تومان"
+            return False, f"❌ خطا: {response.text}"
     except Exception as e:
-        print(f"❌ خطا در به‌روزرسانی واریزی: {e}")
         return False, f"❌ خطا: {e}"
 
 # ============================================================
@@ -554,7 +507,7 @@ async def show_search_keypad(message: Message, user_id: str, bot: Robot):
         )
 
 # ============================================================
-# 💾 نهایی‌سازی سفارش (با ثبت در گوگل‌شیت)
+# 💾 نهایی‌سازی سفارش
 # ============================================================
 
 async def finalize_order(message: Message, user_id: str, bot: Robot):
@@ -634,15 +587,14 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
             'message_id': admin_msg.message_id,
             'chat_id': ADMIN_CHAT_ID,
             'user_name': customer.get('name', 'نامشخص'),
-            'total_payable': total_payable
+            'total_payable': total_payable,
+            'invoice_number': invoice_number  # ✅ اضافه شد
         }
         print(f"✅ فاکتور به حسابدار ارسال شد برای کاربر {user_id} با message_id: {admin_msg.message_id}")
     except Exception as e:
         print(f"⚠️ خطا در ارسال فاکتور به حسابدار: {e}")
     
-    # =============================================
-    # ✅ ثبت سفارش در گوگل‌شیت (فقط این خط اضافه شده)
-    # =============================================
+    # ✅ ثبت سفارش در گوگل‌شیت (Webhook)
     ثبت_سفارش_در_شیت(customer, items_list, total, invoice_number, customer_code)
     
     customer_debts[user_id] = total_payable
@@ -820,9 +772,7 @@ async def handle_message(bot: Robot, message: Message):
                         except Exception as e:
                             print(f"⚠️ خطا در ارسال پیام به کاربر: {e}")
                         
-                        # =============================================
-                        # ✅ به‌روزرسانی واریزی در گوگل‌شیت (فقط این خط اضافه شده)
-                        # =============================================
+                        # ✅ به‌روزرسانی واریزی در گوگل‌شیت (Webhook)
                         result, msg = به‌روزرسانی_واریزی_در_شیت(found_info.get('invoice_number', ''), amount)
                         if result:
                             await message.reply(msg)
