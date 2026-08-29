@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با فاکتور حرفه‌ای
+# 🤖 ربات فروشگاهی - نسخه نهایی با فاکتور حرفه‌ای و Keep-Alive
 # ============================================================
 
 from rubka import Robot, Message
@@ -158,25 +158,21 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور با کیفیت بالا + کادر + حاشیه
+# 🖼️ تولید فاکتور با کیفیت بالا، راست‌چین و کادر
 # ============================================================
 
 def create_invoice_image(customer, items, total, previous_debt, invoice_number, customer_code):
-    # ابعاد با حاشیه‌های 80 پیکسلی
     margin = 80
     width = 3000
     height = 600 + len(items) * 130 + 650
     if previous_debt > 0:
         height += 120
     
-    # ایجاد بوم سفید
     image = Image.new('RGB', (width, height), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
     
-    # =============================================
-    # 🖼️ کادر اصلی فاکتور (Border)
-    # =============================================
-    border_color = (30, 80, 180)  # آبی تیره
+    # کادر اصلی
+    border_color = (30, 80, 180)
     border_width = 6
     draw.rectangle(
         [(margin, margin), (width - margin, height - margin)],
@@ -184,9 +180,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         width=border_width
     )
     
-    # =============================================
-    # 📁 فونت‌ها
-    # =============================================
+    # فونت‌ها
     font_paths = [
         "C:/Windows/Fonts/arial.ttf",
         "C:/Windows/Fonts/tahoma.ttf",
@@ -221,9 +215,6 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         font_bold = ImageFont.load_default()
         font_footer = ImageFont.load_default()
     
-    # =============================================
-    # 🏷️ هدر فاکتور
-    # =============================================
     y = margin + 40
     margin_right = width - margin - 40
     
@@ -236,6 +227,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         except:
             pass
     
+    # هدر
     draw.text((margin_right - 400, y), "فاکتور فروش", fill=(30, 80, 180), font=font_title)
     draw.text((margin_right - 450, y + 85), f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}", fill=(100, 100, 100), font=font_header)
     draw.text((margin_right - 550, y), f"شماره: {invoice_number}", fill=(0, 0, 0), font=font_header)
@@ -243,9 +235,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     y += 230
     
-    # =============================================
-    # 👤 اطلاعات مشتری
-    # =============================================
+    # اطلاعات مشتری
     draw.rectangle(
         [(margin + 20, y), (width - margin - 20, y + 190)],
         fill=(245, 248, 250),
@@ -259,22 +249,18 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     y += 240
     
-    # =============================================
-    # 📊 جدول محصولات
-    # =============================================
-    # هدر جدول
+    # جدول
     draw.rectangle(
         [(margin + 20, y), (width - margin - 20, y + 95)],
         fill=(30, 80, 180)
     )
     
-    # موقعیت ستون‌ها (از راست به چپ)
-    col1 = width - margin - 60      # ردیف
-    col2 = width - margin - 360     # نام مدل
-    col3 = width - margin - 660     # جفت
-    col4 = width - margin - 960     # کارتن
-    col5 = width - margin - 1260    # قیمت هر جفت
-    col6 = width - margin - 1590    # مبلغ کل
+    col1 = width - margin - 60
+    col2 = width - margin - 360
+    col3 = width - margin - 660
+    col4 = width - margin - 960
+    col5 = width - margin - 1260
+    col6 = width - margin - 1590
     
     draw.text((col1 - 50, y + 28), "ردیف", fill=(255, 255, 255), font=font_bold)
     draw.text((col2 - 150, y + 28), "نام مدل", fill=(255, 255, 255), font=font_bold)
@@ -285,7 +271,6 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     y += 95
     
-    # ردیف‌های محصولات
     for i, item in enumerate(items, 1):
         if i % 2 == 0:
             draw.rectangle(
@@ -300,7 +285,6 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         draw.text((col6 - 120, y + 30), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
         y += 105
     
-    # خط جداکننده
     draw.line(
         [(margin + 20, y), (width - margin - 20, y)],
         fill=(200, 210, 220),
@@ -308,9 +292,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     )
     y += 60
     
-    # =============================================
-    # 💰 جمع‌بندی
-    # =============================================
+    # جمع‌بندی
     draw.text((margin_right - 500, y), f"جمع سفارش جدید: {format_price(total)} تومان", fill=(30, 80, 180), font=font_bold)
     y += 95
     
@@ -324,9 +306,6 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     y += 190
     draw.text((margin_right - 300, y), "🙏 از اعتماد شما سپاسگزاریم!", fill=(150, 150, 150), font=font_footer)
     
-    # =============================================
-    # 💾 ذخیره فایل
-    # =============================================
     filename = f"invoices/invoice_{invoice_number}.png"
     os.makedirs("invoices", exist_ok=True)
     image.save(filename, "PNG", quality=100, dpi=(300, 300))
@@ -762,7 +741,7 @@ async def handle_message(bot: Robot, message: Message):
                 return
 
 # ============================================================
-# 🎯 پردازش کلیک دکمه‌ها
+# 🎯 پردازش کلیک دکمه‌ها (با اصلاح حذف از سبد خرید)
 # ============================================================
 
 @bot.on_callback()
@@ -880,7 +859,7 @@ async def handle_callback(bot: Robot, message: Message):
         await message.reply_keypad(text, keypad)
         return
     
-    # حذف محصول از سبد خرید (بدون تکرار)
+    # ✅ حذف محصول از سبد خرید (بدون تکرار)
     if data.startswith('remove_'):
         product_name = data.replace('remove_', '')
         cart['items'] = [item for item in cart['items'] if item['name'] != product_name]
@@ -898,7 +877,7 @@ async def handle_callback(bot: Robot, message: Message):
             await show_cart_internal(bot, message, user_id)
         return
     
-    # خالی کردن سبد خرید (بدون تکرار)
+    # ✅ خالی کردن سبد خرید (بدون تکرار)
     if data == 'clear_cart':
         cart['items'] = []
         await message.reply("🗑️ **سبد خرید شما خالی شد.**")
