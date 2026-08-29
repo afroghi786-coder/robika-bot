@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با Keep-Alive + اصلاحات
+# 🤖 ربات فروشگاهی - نسخه نهایی با فاکتور RTL و کیفیت بالا
 # ============================================================
 
 from rubka import Robot, Message
@@ -158,35 +158,31 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور با کیفیت بالا (اصلاح نهایی فارسی)
+# 🖼️ تولید فاکتور با راست‌چین و کیفیت بالا
 # ============================================================
 
 def persian_text(text):
     """تبدیل متن فارسی به شکل قابل نمایش در PIL با راست‌چین"""
     if not text:
         return ""
-    # reshape و bidi برای نمایش صحیح فارسی
     reshaped = arabic_reshaper.reshape(text)
     bidi_text = get_display(reshaped)
     return bidi_text
 
 def create_invoice_image(customer, items, total, previous_debt, invoice_number, customer_code):
-    # افزایش ابعاد برای کیفیت بالاتر
-    width = 2000
-    height = 350 + len(items) * 100 + 450
+    # ابعاد بزرگتر برای کیفیت بالا
+    width = 2200
+    height = 400 + len(items) * 100 + 500
     if previous_debt > 0:
         height += 100
     
     image = Image.new('RGB', (width, height), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
     
-    # اولویت فونت‌های یونیکد که از فارسی پشتیبانی می‌کنند
+    # لیست فونت‌ها با اولویت
     font_paths = [
-        # فونت‌های استاندارد لینوکس/یونیکس (اولویت بالاتر)
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
-        # فونت‌های ویندوز (برای محیط محلی)
         "C:/Windows/Fonts/arial.ttf",
         "C:/Windows/Fonts/tahoma.ttf",
         "C:/Windows/Fonts/B_Nazanin.ttf",
@@ -194,7 +190,6 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         "C:/Windows/Fonts/B_Yas.ttf",
         "C:/Windows/Fonts/B_Mitra.ttf",
         "C:/Windows/Fonts/B_Koodak.ttf",
-        # فونت‌های مک (اختیاری)
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Tahoma.ttf"
     ]
@@ -207,20 +202,18 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     if font_found:
         try:
-            font_title = ImageFont.truetype(font_found, 60)
-            font_header = ImageFont.truetype(font_found, 44)
-            font_normal = ImageFont.truetype(font_found, 34)
-            font_bold = ImageFont.truetype(font_found, 38)
-            font_footer = ImageFont.truetype(font_found, 48)
-        except Exception as e:
-            print(f"⚠️ خطا در بارگذاری فونت {font_found}: {e}")
+            font_title = ImageFont.truetype(font_found, 56)
+            font_header = ImageFont.truetype(font_found, 40)
+            font_normal = ImageFont.truetype(font_found, 32)
+            font_bold = ImageFont.truetype(font_found, 36)
+            font_footer = ImageFont.truetype(font_found, 44)
+        except:
             font_title = ImageFont.load_default()
             font_header = ImageFont.load_default()
             font_normal = ImageFont.load_default()
             font_bold = ImageFont.load_default()
             font_footer = ImageFont.load_default()
     else:
-        print("⚠️ هیچ فونت فارسی‌پذیری یافت نشد، از فونت پیش‌فرض استفاده می‌شود.")
         font_title = ImageFont.load_default()
         font_header = ImageFont.load_default()
         font_normal = ImageFont.load_default()
@@ -228,71 +221,75 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         font_footer = ImageFont.load_default()
     
     y = 40
+    margin_right = width - 60  # برای راست‌چین
     
+    # لوگو
     if os.path.exists("logo.png"):
         try:
             logo = Image.open("logo.png")
-            logo = logo.resize((220, 170))
+            logo = logo.resize((200, 150))
             image.paste(logo, (40, 20))
         except:
             pass
     
-    # هدر فاکتور با فارسی اصلاح‌شده
-    draw.text((500, 40), persian_text("🧾 فاکتور فروش"), fill=(0, 0, 0), font=font_title)
-    draw.text((500, 110), persian_text(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}"), fill=(80, 80, 80), font=font_header)
-    draw.text((1350, 40), persian_text(f"شماره فاکتور: {invoice_number}"), fill=(0, 0, 0), font=font_header)
-    draw.text((1350, 100), persian_text(f"کد مشتری: {customer_code}"), fill=(0, 0, 150), font=font_header)
+    # هدر (راست‌چین)
+    draw.text((margin_right - 300, 40), persian_text("فاکتور فروش 🧾"), fill=(0, 0, 0), font=font_title)
+    draw.text((margin_right - 350, 105), persian_text(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}"), fill=(80, 80, 80), font=font_header)
+    draw.text((margin_right - 450, 40), persian_text(f"شماره فاکتور: {invoice_number}"), fill=(0, 0, 0), font=font_header)
+    draw.text((margin_right - 350, 105), persian_text(f"کد مشتری: {customer_code}"), fill=(0, 0, 150), font=font_header)
     
-    y = 230
+    y = 220
     
-    # اطلاعات مشتری با فارسی اصلاح‌شده
-    draw.rectangle([(40, y), (1960, y+150)], outline=(200, 200, 200), width=3)
-    draw.text((60, y+30), persian_text(f"👤 مشتری: {customer.get('name', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
-    draw.text((60, y+85), persian_text(f"📞 تلفن: {customer.get('phone', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
-    draw.text((800, y+30), persian_text(f"📍 آدرس: {customer.get('address', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
-    draw.text((800, y+85), persian_text(f"🚚 باربری: {customer.get('shipping', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
+    # اطلاعات مشتری (راست‌چین)
+    draw.rectangle([(40, y), (width-40, y+160)], outline=(200, 200, 200), width=3)
+    draw.text((margin_right - 200, y+30), persian_text(f"مشتری: {customer.get('name', 'نامشخص')} 👤"), fill=(0, 0, 0), font=font_normal)
+    draw.text((margin_right - 250, y+85), persian_text(f"تلفن: {customer.get('phone', 'نامشخص')} 📞"), fill=(0, 0, 0), font=font_normal)
+    draw.text((margin_right - 250, y+140), persian_text(f"آدرس: {customer.get('address', 'نامشخص')} 📍"), fill=(0, 0, 0), font=font_normal)
+    draw.text((400, y+30), persian_text(f"باربری: {customer.get('shipping', 'نامشخص')} 🚚"), fill=(0, 0, 0), font=font_normal)
     
-    y += 200
+    y += 210
     
-    # جدول محصولات
-    draw.rectangle([(40, y), (1960, y+80)], fill=(50, 50, 50))
-    draw.text((60, y+20), persian_text("ردیف"), fill=(255, 255, 255), font=font_bold)
-    draw.text((200, y+20), persian_text("نام محصول"), fill=(255, 255, 255), font=font_bold)
-    draw.text((1000, y+20), persian_text("تعداد"), fill=(255, 255, 255), font=font_bold)
-    draw.text((1200, y+20), persian_text("قیمت واحد"), fill=(255, 255, 255), font=font_bold)
-    draw.text((1550, y+20), persian_text("مبلغ کل"), fill=(255, 255, 255), font=font_bold)
+    # جدول محصولات (راست‌چین)
+    draw.rectangle([(40, y), (width-40, y+70)], fill=(50, 50, 50))
+    col1, col2, col3, col4, col5, col6 = width-60, width-280, width-480, width-680, width-920, width-1150
+    draw.text((col1-40, y+18), persian_text("ردیف"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col2-80, y+18), persian_text("نام مدل"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col3-40, y+18), persian_text("تعداد جفت"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col4-40, y+18), persian_text("تعداد کارتن"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col5-60, y+18), persian_text("قیمت هر جفت"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col6-60, y+18), persian_text("مبلغ کل"), fill=(255, 255, 255), font=font_bold)
     
-    y += 80
+    y += 70
     
-    # آیتم‌های محصولات (اعداد و قیمت‌ها بدون تغییر)
+    # آیتم‌ها
     for i, item in enumerate(items, 1):
         if i % 2 == 0:
-            draw.rectangle([(40, y), (1960, y+85)], fill=(240, 240, 240))
-        draw.text((60, y+25), str(i), fill=(0, 0, 0), font=font_normal)
-        draw.text((200, y+25), persian_text(item['name'][:40]), fill=(0, 0, 0), font=font_normal)
-        draw.text((1000, y+25), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
-        draw.text((1200, y+25), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
-        draw.text((1550, y+25), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
-        y += 85
+            draw.rectangle([(40, y), (width-40, y+80)], fill=(240, 240, 240))
+        draw.text((col1-40, y+25), str(i), fill=(0, 0, 0), font=font_normal)
+        draw.text((col2-80, y+25), persian_text(item['name'][:35]), fill=(0, 0, 0), font=font_normal)
+        draw.text((col3-40, y+25), str(item['pairCount']), fill=(0, 0, 0), font=font_normal)
+        draw.text((col4-40, y+25), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
+        draw.text((col5-60, y+25), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
+        draw.text((col6-60, y+25), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
+        y += 80
     
-    draw.line([(40, y), (1960, y)], fill=(200, 200, 200), width=4)
+    draw.line([(40, y), (width-40, y)], fill=(200, 200, 200), width=4)
     y += 50
     
-    # جمع مبالغ با فارسی اصلاح‌شده
-    draw.text((1100, y), persian_text(f"💰 جمع سفارش جدید: {format_price(total)} تومان"), fill=(0, 0, 200), font=font_bold)
+    # جمع‌بندی (راست‌چین)
+    draw.text((margin_right - 350, y), persian_text(f"جمع سفارش جدید: {format_price(total)} تومان 💰"), fill=(0, 0, 200), font=font_bold)
     y += 80
     
     if previous_debt > 0:
-        draw.text((1100, y), persian_text(f"💳 بدهی قبلی: {format_price(previous_debt)} تومان"), fill=(200, 0, 0), font=font_bold)
+        draw.text((margin_right - 350, y), persian_text(f"بدهی قبلی: {format_price(previous_debt)} تومان 💳"), fill=(200, 0, 0), font=font_bold)
         y += 80
-        draw.text((1100, y), persian_text(f"💳 مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان"), fill=(0, 150, 0), font=font_bold)
+        draw.text((margin_right - 400, y), persian_text(f"مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان 💳"), fill=(0, 150, 0), font=font_bold)
     else:
-        draw.text((1100, y), persian_text(f"💰 مبلغ قابل پرداخت: {format_price(total)} تومان"), fill=(0, 150, 0), font=font_bold)
+        draw.text((margin_right - 350, y), persian_text(f"مبلغ قابل پرداخت: {format_price(total)} تومان 💰"), fill=(0, 150, 0), font=font_bold)
     
     y += 140
-    draw.text((60, y), persian_text("🙏 از اعتماد شما سپاسگزاریم!"), fill=(100, 100, 100), font=font_footer)
+    draw.text((margin_right - 200, y), persian_text("🙏 از اعتماد شما سپاسگزاریم!"), fill=(100, 100, 100), font=font_footer)
     
-    # ذخیره با کیفیت بالا
     filename = f"invoices/invoice_{invoice_number}.png"
     os.makedirs("invoices", exist_ok=True)
     image.save(filename, "PNG", quality=100, dpi=(300, 300))
