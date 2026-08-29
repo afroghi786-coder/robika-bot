@@ -1,4 +1,4 @@
-rubka==0.1.0
+git+https://github.com/Mahdy-Ahmadi/Rubka.git
 Pillow>=10.4.0
 arabic-reshaper==3.0.0
 python-bidi==0.4.2
