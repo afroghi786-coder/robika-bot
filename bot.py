@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با Webhook گوگل‌شیت
+# 🤖 ربات فروشگاهی - نسخه نهایی با ذخیره‌سازی هر محصول در یک ردیف
 # ============================================================
 
 from rubka import Robot, Message
@@ -44,14 +44,12 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 # ============================================================
 
 # 🔴 این آدرس را با آدرس Webhook خود جایگزین کنید
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyX4JXna5iScMqMdwcnLJ4BG8N4xC3F4YVTWwZe7-ewP23iXpA1vS6x59tWsUOkr_oSDQ/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycb.../exec"
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
-    """ارسال کامل سفارش به Webhook گوگل‌شیت"""
+    """ارسال سفارش به Webhook - هر محصول یک ردیف"""
     try:
-        # ساخت لیست محصولات به‌صورت خوانا
-        products_text = ', '.join([f"{item['name']} (x{item['quantity']})" for item in items])
-
+        # ساخت payload با لیست محصولات
         payload = {
             "action": "register",
             "timestamp": datetime.now().isoformat(),
@@ -62,11 +60,7 @@ def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, custom
             "customer_address": customer.get('address', ''),
             "customer_shipping": customer.get('shipping', ''),
             "total": total,
-            "products": products_text,
-            "payment_status": "در انتظار واریزی",
-            "last_payment_date": "",
-            "total_paid": 0,
-            "remaining_debt": total
+            "items": items  # ← آرایه‌ای از محصولات
         }
 
         print(f"📤 ارسال به Webhook: {WEBHOOK_URL}")
@@ -231,7 +225,7 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور
+# 🖼️ تولید فاکتور (بدون تغییر)
 # ============================================================
 
 def persian_text(text):
@@ -607,7 +601,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     except Exception as e:
         print(f"⚠️ خطا در ارسال فاکتور به حسابدار: {e}")
 
-    # ✅ ثبت سفارش در گوگل‌شیت (Webhook)
+    # ✅ ثبت سفارش در گوگل‌شیت (هر محصول یک ردیف)
     ثبت_سفارش_در_شیت(customer, items_list, total, invoice_number, customer_code)
 
     customer_debts[user_id] = total_payable
@@ -785,7 +779,7 @@ async def handle_message(bot: Robot, message: Message):
                         except Exception as e:
                             print(f"⚠️ خطا در ارسال پیام به کاربر: {e}")
 
-                        # ✅ به‌روزرسانی واریزی در گوگل‌شیت (Webhook)
+                        # ✅ به‌روزرسانی واریزی در گوگل‌شیت
                         result, msg = به‌روزرسانی_واریزی_در_شیت(found_info.get('invoice_number', ''), amount)
                         if result:
                             await message.reply(msg)
