@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با Webhook گوگل‌شیت
+# 🤖 ربات فروشگاهی - نسخه نهایی با Webhook گوگل‌شیت + Keep-Alive
 # ============================================================
 
 from rubka import Robot, Message
@@ -43,7 +43,7 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxJWgsLfvoPoyGoUKf-Xl0exib1jcF27z3B29mWjoAxaK95HgsSvU_zD9zUQQal8HUibA/exec"  # ← آدرس Webhook خود را اینجا قرار دهید
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxKAZZx9XrEewXkzhhnI2M0m5qKfKyiU_BfloQH9iLpVYCBS-PVV__o4MOKNZEXerpuRw/exec"  # ← آدرس Webhook خود را اینجا قرار دهید
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     """ارسال سفارش به Webhook گوگل‌شیت"""
@@ -588,7 +588,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
             'chat_id': ADMIN_CHAT_ID,
             'user_name': customer.get('name', 'نامشخص'),
             'total_payable': total_payable,
-            'invoice_number': invoice_number  # ✅ اضافه شد
+            'invoice_number': invoice_number
         }
         print(f"✅ فاکتور به حسابدار ارسال شد برای کاربر {user_id} با message_id: {admin_msg.message_id}")
     except Exception as e:
@@ -1041,7 +1041,7 @@ async def show_cart_internal(bot: Robot, message: Message, user_id: str):
     await message.reply_keypad(text, keypad)
 
 # ============================================================
-# 🌐 Flask برای Keep-Alive
+# 🌐 Flask برای Keep-Alive (مهم!)
 # ============================================================
 
 app = Flask(__name__)
