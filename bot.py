@@ -158,8 +158,12 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور با کیفیت بالا (اصلاح‌شده)
+# 🖼️ تولید فاکتور با کیفیت بالا (اصلاح‌شده برای فارسی)
 # ============================================================
+
+def persian_text(text):
+    """تبدیل متن فارسی به شکل قابل نمایش در PIL با راست‌چین"""
+    return get_display(arabic_reshaper.reshape(text))
 
 def create_invoice_image(customer, items, total, previous_debt, invoice_number, customer_code):
     # افزایش ابعاد برای کیفیت بالاتر
@@ -195,7 +199,6 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
             font_found = path
             break
     
-    # اگر هیچ فونتی پیدا نشد، از فونت پیش‌فرض استفاده می‌کنیم
     if font_found:
         try:
             font_title = ImageFont.truetype(font_found, 60)
@@ -218,7 +221,6 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     y = 40
     
-    # لوگو (در صورت وجود)
     if os.path.exists("logo.png"):
         try:
             logo = Image.open("logo.png")
@@ -227,30 +229,30 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         except:
             pass
     
-    # هدر فاکتور
-    draw.text((500, 40), get_display(arabic_reshaper.reshape("🧾 فاکتور فروش")), fill=(0, 0, 0), font=font_title)
-    draw.text((500, 110), get_display(arabic_reshaper.reshape(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}")), fill=(80, 80, 80), font=font_header)
-    draw.text((1350, 40), get_display(arabic_reshaper.reshape(f"شماره فاکتور: {invoice_number}")), fill=(0, 0, 0), font=font_header)
-    draw.text((1350, 100), get_display(arabic_reshaper.reshape(f"کد مشتری: {customer_code}")), fill=(0, 0, 150), font=font_header)
+    # هدر فاکتور با فارسی اصلاح‌شده
+    draw.text((500, 40), persian_text("🧾 فاکتور فروش"), fill=(0, 0, 0), font=font_title)
+    draw.text((500, 110), persian_text(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}"), fill=(80, 80, 80), font=font_header)
+    draw.text((1350, 40), persian_text(f"شماره فاکتور: {invoice_number}"), fill=(0, 0, 0), font=font_header)
+    draw.text((1350, 100), persian_text(f"کد مشتری: {customer_code}"), fill=(0, 0, 150), font=font_header)
     
     y = 230
     
-    # اطلاعات مشتری
+    # اطلاعات مشتری با فارسی اصلاح‌شده
     draw.rectangle([(40, y), (1960, y+150)], outline=(200, 200, 200), width=3)
-    draw.text((60, y+30), get_display(arabic_reshaper.reshape(f"👤 مشتری: {customer.get('name', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
-    draw.text((60, y+85), get_display(arabic_reshaper.reshape(f"📞 تلفن: {customer.get('phone', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
-    draw.text((800, y+30), get_display(arabic_reshaper.reshape(f"📍 آدرس: {customer.get('address', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
-    draw.text((800, y+85), get_display(arabic_reshaper.reshape(f"🚚 باربری: {customer.get('shipping', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
+    draw.text((60, y+30), persian_text(f"👤 مشتری: {customer.get('name', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
+    draw.text((60, y+85), persian_text(f"📞 تلفن: {customer.get('phone', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
+    draw.text((800, y+30), persian_text(f"📍 آدرس: {customer.get('address', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
+    draw.text((800, y+85), persian_text(f"🚚 باربری: {customer.get('shipping', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
     
     y += 200
     
     # جدول محصولات
     draw.rectangle([(40, y), (1960, y+80)], fill=(50, 50, 50))
-    draw.text((60, y+20), get_display(arabic_reshaper.reshape("ردیف")), fill=(255, 255, 255), font=font_bold)
-    draw.text((200, y+20), get_display(arabic_reshaper.reshape("نام محصول")), fill=(255, 255, 255), font=font_bold)
-    draw.text((1000, y+20), get_display(arabic_reshaper.reshape("تعداد")), fill=(255, 255, 255), font=font_bold)
-    draw.text((1200, y+20), get_display(arabic_reshaper.reshape("قیمت واحد")), fill=(255, 255, 255), font=font_bold)
-    draw.text((1550, y+20), get_display(arabic_reshaper.reshape("مبلغ کل")), fill=(255, 255, 255), font=font_bold)
+    draw.text((60, y+20), persian_text("ردیف"), fill=(255, 255, 255), font=font_bold)
+    draw.text((200, y+20), persian_text("نام محصول"), fill=(255, 255, 255), font=font_bold)
+    draw.text((1000, y+20), persian_text("تعداد"), fill=(255, 255, 255), font=font_bold)
+    draw.text((1200, y+20), persian_text("قیمت واحد"), fill=(255, 255, 255), font=font_bold)
+    draw.text((1550, y+20), persian_text("مبلغ کل"), fill=(255, 255, 255), font=font_bold)
     
     y += 80
     
@@ -259,7 +261,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         if i % 2 == 0:
             draw.rectangle([(40, y), (1960, y+85)], fill=(240, 240, 240))
         draw.text((60, y+25), str(i), fill=(0, 0, 0), font=font_normal)
-        draw.text((200, y+25), get_display(arabic_reshaper.reshape(item['name'][:40])), fill=(0, 0, 0), font=font_normal)
+        draw.text((200, y+25), persian_text(item['name'][:40]), fill=(0, 0, 0), font=font_normal)
         draw.text((1000, y+25), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
         draw.text((1200, y+25), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
         draw.text((1550, y+25), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
@@ -268,19 +270,19 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     draw.line([(40, y), (1960, y)], fill=(200, 200, 200), width=4)
     y += 50
     
-    # جمع مبالغ
-    draw.text((1100, y), get_display(arabic_reshaper.reshape(f"💰 جمع سفارش جدید: {format_price(total)} تومان")), fill=(0, 0, 200), font=font_bold)
+    # جمع مبالغ با فارسی اصلاح‌شده
+    draw.text((1100, y), persian_text(f"💰 جمع سفارش جدید: {format_price(total)} تومان"), fill=(0, 0, 200), font=font_bold)
     y += 80
     
     if previous_debt > 0:
-        draw.text((1100, y), get_display(arabic_reshaper.reshape(f"💳 بدهی قبلی: {format_price(previous_debt)} تومان")), fill=(200, 0, 0), font=font_bold)
+        draw.text((1100, y), persian_text(f"💳 بدهی قبلی: {format_price(previous_debt)} تومان"), fill=(200, 0, 0), font=font_bold)
         y += 80
-        draw.text((1100, y), get_display(arabic_reshaper.reshape(f"💳 مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان")), fill=(0, 150, 0), font=font_bold)
+        draw.text((1100, y), persian_text(f"💳 مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان"), fill=(0, 150, 0), font=font_bold)
     else:
-        draw.text((1100, y), get_display(arabic_reshaper.reshape(f"💰 مبلغ قابل پرداخت: {format_price(total)} تومان")), fill=(0, 150, 0), font=font_bold)
+        draw.text((1100, y), persian_text(f"💰 مبلغ قابل پرداخت: {format_price(total)} تومان"), fill=(0, 150, 0), font=font_bold)
     
     y += 140
-    draw.text((60, y), get_display(arabic_reshaper.reshape("🙏 از اعتماد شما سپاسگزاریم!")), fill=(100, 100, 100), font=font_footer)
+    draw.text((60, y), persian_text("🙏 از اعتماد شما سپاسگزاریم!"), fill=(100, 100, 100), font=font_footer)
     
     # ذخیره با کیفیت بالا
     filename = f"invoices/invoice_{invoice_number}.png"
@@ -841,11 +843,8 @@ async def handle_callback(bot: Robot, message: Message):
     # ============================================================
     if data.startswith('remove_'):
         product_name = data.replace('remove_', '')
-        # حذف محصول از سبد
         cart['items'] = [item for item in cart['items'] if item['name'] != product_name]
-        # ارسال پیام تأیید
         await message.reply(f"🗑️ **{product_name}** از سبد خرید حذف شد.")
-        # نمایش سبد خرید به‌روز شده (بدون تکرار)
         if len(cart['items']) == 0:
             await message.reply("🛒 سبد خرید شما خالی است.")
             menu_keypad = ChatKeypadBuilder() \
@@ -856,7 +855,6 @@ async def handle_callback(bot: Robot, message: Message):
                 .build()
             await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
         else:
-            # نمایش مجدد سبد خرید به‌روز شده
             await show_cart_internal(bot, message, user_id)
         return
     
@@ -919,7 +917,6 @@ async def handle_callback(bot: Robot, message: Message):
 # ============================================================
 
 async def show_cart_internal(bot: Robot, message: Message, user_id: str):
-    """نمایش سبد خرید به‌روز شده بدون تکرار"""
     cart = get_cart(user_id)
     if len(cart['items']) == 0:
         await message.reply("🛒 سبد خرید شما خالی است!")
