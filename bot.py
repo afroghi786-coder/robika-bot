@@ -44,7 +44,7 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 # ============================================================
 
 # 🔴 این آدرس را با آدرس Webhook خود جایگزین کنید
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycb.../exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyCmR23A3GCateCgbtKZFh61b6xmva0q9sCOXkYH_0pAQQD0V5QO3u-IIfsjyvtEaR53Q/exec"
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     """ارسال سفارش به Webhook - هر محصول یک ردیف"""
