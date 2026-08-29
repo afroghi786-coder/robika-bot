@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با Keep-Alive برای Render
+# 🤖 ربات فروشگاهی - نسخه نهایی با Keep-Alive + اصلاحات
 # ============================================================
 
 from rubka import Robot, Message
@@ -12,11 +12,10 @@ import arabic_reshaper
 from bidi.algorithm import get_display
 import json
 import threading
-import requests
 from flask import Flask, request, jsonify
 
 # ============================================================
-# 📦 ذخیره‌سازی دائمی محصولات (با قابلیت به‌روزرسانی قیمت)
+# 📦 ذخیره‌سازی دائمی محصولات
 # ============================================================
 
 PRODUCTS_FILE = "products.json"
@@ -159,25 +158,35 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور
+# 🖼️ تولید فاکتور با کیفیت بالا (اصلاح‌شده)
 # ============================================================
 
 def create_invoice_image(customer, items, total, previous_debt, invoice_number, customer_code):
-    width = 1400
-    height = 250 + len(items) * 80 + 350
+    # افزایش ابعاد برای کیفیت بالاتر
+    width = 2000
+    height = 350 + len(items) * 100 + 450
     if previous_debt > 0:
-        height += 80
+        height += 100
     
     image = Image.new('RGB', (width, height), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
     
+    # لیست گسترده‌تر از فونت‌های زیبا
     font_paths = [
+        # فونت‌های استاندارد لینوکس/یونیکس
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        # فونت‌های ویندوز (برای محیط محلی)
         "C:/Windows/Fonts/B_Nazanin.ttf",
         "C:/Windows/Fonts/B_Titr.ttf",
         "C:/Windows/Fonts/B_Yas.ttf",
         "C:/Windows/Fonts/B_Mitra.ttf",
         "C:/Windows/Fonts/B_Koodak.ttf",
-        "C:/Windows/Fonts/arial.ttf"
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/tahoma.ttf",
+        # فونت‌های مک (اختیاری)
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Supplemental/Tahoma.ttf"
     ]
     
     font_found = None
@@ -186,13 +195,14 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
             font_found = path
             break
     
+    # اگر هیچ فونتی پیدا نشد، از فونت پیش‌فرض استفاده می‌کنیم
     if font_found:
         try:
-            font_title = ImageFont.truetype(font_found, 44)
-            font_header = ImageFont.truetype(font_found, 32)
-            font_normal = ImageFont.truetype(font_found, 24)
-            font_bold = ImageFont.truetype(font_found, 28)
-            font_footer = ImageFont.truetype(font_found, 34)
+            font_title = ImageFont.truetype(font_found, 60)
+            font_header = ImageFont.truetype(font_found, 44)
+            font_normal = ImageFont.truetype(font_found, 34)
+            font_bold = ImageFont.truetype(font_found, 38)
+            font_footer = ImageFont.truetype(font_found, 48)
         except:
             font_title = ImageFont.load_default()
             font_header = ImageFont.load_default()
@@ -206,69 +216,76 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         font_bold = ImageFont.load_default()
         font_footer = ImageFont.load_default()
     
-    y = 30
+    y = 40
     
+    # لوگو (در صورت وجود)
     if os.path.exists("logo.png"):
         try:
             logo = Image.open("logo.png")
-            logo = logo.resize((180, 140))
-            image.paste(logo, (30, 15))
+            logo = logo.resize((220, 170))
+            image.paste(logo, (40, 20))
         except:
             pass
     
-    draw.text((350, 30), get_display(arabic_reshaper.reshape("🧾 فاکتور فروش")), fill=(0, 0, 0), font=font_title)
-    draw.text((350, 85), get_display(arabic_reshaper.reshape(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}")), fill=(80, 80, 80), font=font_header)
-    draw.text((950, 30), get_display(arabic_reshaper.reshape(f"شماره فاکتور: {invoice_number}")), fill=(0, 0, 0), font=font_header)
-    draw.text((950, 75), get_display(arabic_reshaper.reshape(f"کد مشتری: {customer_code}")), fill=(0, 0, 150), font=font_header)
+    # هدر فاکتور
+    draw.text((500, 40), get_display(arabic_reshaper.reshape("🧾 فاکتور فروش")), fill=(0, 0, 0), font=font_title)
+    draw.text((500, 110), get_display(arabic_reshaper.reshape(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}")), fill=(80, 80, 80), font=font_header)
+    draw.text((1350, 40), get_display(arabic_reshaper.reshape(f"شماره فاکتور: {invoice_number}")), fill=(0, 0, 0), font=font_header)
+    draw.text((1350, 100), get_display(arabic_reshaper.reshape(f"کد مشتری: {customer_code}")), fill=(0, 0, 150), font=font_header)
     
-    y = 170
+    y = 230
     
-    draw.rectangle([(30, y), (1370, y+110)], outline=(200, 200, 200), width=2)
-    draw.text((40, y+25), get_display(arabic_reshaper.reshape(f"👤 مشتری: {customer.get('name', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
-    draw.text((40, y+65), get_display(arabic_reshaper.reshape(f"📞 تلفن: {customer.get('phone', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
-    draw.text((600, y+25), get_display(arabic_reshaper.reshape(f"📍 آدرس: {customer.get('address', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
-    draw.text((600, y+65), get_display(arabic_reshaper.reshape(f"🚚 باربری: {customer.get('shipping', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
+    # اطلاعات مشتری
+    draw.rectangle([(40, y), (1960, y+150)], outline=(200, 200, 200), width=3)
+    draw.text((60, y+30), get_display(arabic_reshaper.reshape(f"👤 مشتری: {customer.get('name', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
+    draw.text((60, y+85), get_display(arabic_reshaper.reshape(f"📞 تلفن: {customer.get('phone', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
+    draw.text((800, y+30), get_display(arabic_reshaper.reshape(f"📍 آدرس: {customer.get('address', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
+    draw.text((800, y+85), get_display(arabic_reshaper.reshape(f"🚚 باربری: {customer.get('shipping', 'نامشخص')}")), fill=(0, 0, 0), font=font_normal)
     
-    y += 150
+    y += 200
     
-    draw.rectangle([(30, y), (1370, y+60)], fill=(50, 50, 50))
-    draw.text((40, y+15), get_display(arabic_reshaper.reshape("ردیف")), fill=(255, 255, 255), font=font_bold)
-    draw.text((150, y+15), get_display(arabic_reshaper.reshape("نام محصول")), fill=(255, 255, 255), font=font_bold)
-    draw.text((700, y+15), get_display(arabic_reshaper.reshape("تعداد")), fill=(255, 255, 255), font=font_bold)
-    draw.text((850, y+15), get_display(arabic_reshaper.reshape("قیمت واحد")), fill=(255, 255, 255), font=font_bold)
-    draw.text((1100, y+15), get_display(arabic_reshaper.reshape("مبلغ کل")), fill=(255, 255, 255), font=font_bold)
+    # جدول محصولات
+    draw.rectangle([(40, y), (1960, y+80)], fill=(50, 50, 50))
+    draw.text((60, y+20), get_display(arabic_reshaper.reshape("ردیف")), fill=(255, 255, 255), font=font_bold)
+    draw.text((200, y+20), get_display(arabic_reshaper.reshape("نام محصول")), fill=(255, 255, 255), font=font_bold)
+    draw.text((1000, y+20), get_display(arabic_reshaper.reshape("تعداد")), fill=(255, 255, 255), font=font_bold)
+    draw.text((1200, y+20), get_display(arabic_reshaper.reshape("قیمت واحد")), fill=(255, 255, 255), font=font_bold)
+    draw.text((1550, y+20), get_display(arabic_reshaper.reshape("مبلغ کل")), fill=(255, 255, 255), font=font_bold)
     
-    y += 60
+    y += 80
     
+    # آیتم‌های محصولات
     for i, item in enumerate(items, 1):
         if i % 2 == 0:
-            draw.rectangle([(30, y), (1370, y+65)], fill=(240, 240, 240))
-        draw.text((40, y+20), str(i), fill=(0, 0, 0), font=font_normal)
-        draw.text((150, y+20), get_display(arabic_reshaper.reshape(item['name'][:30])), fill=(0, 0, 0), font=font_normal)
-        draw.text((700, y+20), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
-        draw.text((850, y+20), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
-        draw.text((1100, y+20), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
-        y += 65
+            draw.rectangle([(40, y), (1960, y+85)], fill=(240, 240, 240))
+        draw.text((60, y+25), str(i), fill=(0, 0, 0), font=font_normal)
+        draw.text((200, y+25), get_display(arabic_reshaper.reshape(item['name'][:40])), fill=(0, 0, 0), font=font_normal)
+        draw.text((1000, y+25), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
+        draw.text((1200, y+25), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
+        draw.text((1550, y+25), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
+        y += 85
     
-    draw.line([(30, y), (1370, y)], fill=(200, 200, 200), width=3)
-    y += 35
+    draw.line([(40, y), (1960, y)], fill=(200, 200, 200), width=4)
+    y += 50
     
-    draw.text((800, y), get_display(arabic_reshaper.reshape(f"💰 جمع سفارش جدید: {format_price(total)} تومان")), fill=(0, 0, 200), font=font_bold)
-    y += 60
+    # جمع مبالغ
+    draw.text((1100, y), get_display(arabic_reshaper.reshape(f"💰 جمع سفارش جدید: {format_price(total)} تومان")), fill=(0, 0, 200), font=font_bold)
+    y += 80
     
     if previous_debt > 0:
-        draw.text((800, y), get_display(arabic_reshaper.reshape(f"💳 بدهی قبلی: {format_price(previous_debt)} تومان")), fill=(200, 0, 0), font=font_bold)
-        y += 60
-        draw.text((800, y), get_display(arabic_reshaper.reshape(f"💳 مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان")), fill=(0, 150, 0), font=font_bold)
+        draw.text((1100, y), get_display(arabic_reshaper.reshape(f"💳 بدهی قبلی: {format_price(previous_debt)} تومان")), fill=(200, 0, 0), font=font_bold)
+        y += 80
+        draw.text((1100, y), get_display(arabic_reshaper.reshape(f"💳 مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان")), fill=(0, 150, 0), font=font_bold)
     else:
-        draw.text((800, y), get_display(arabic_reshaper.reshape(f"💰 مبلغ قابل پرداخت: {format_price(total)} تومان")), fill=(0, 150, 0), font=font_bold)
+        draw.text((1100, y), get_display(arabic_reshaper.reshape(f"💰 مبلغ قابل پرداخت: {format_price(total)} تومان")), fill=(0, 150, 0), font=font_bold)
     
-    y += 100
-    draw.text((40, y), get_display(arabic_reshaper.reshape("🙏 از اعتماد شما سپاسگزاریم!")), fill=(100, 100, 100), font=font_footer)
+    y += 140
+    draw.text((60, y), get_display(arabic_reshaper.reshape("🙏 از اعتماد شما سپاسگزاریم!")), fill=(100, 100, 100), font=font_footer)
     
+    # ذخیره با کیفیت بالا
     filename = f"invoices/invoice_{invoice_number}.png"
     os.makedirs("invoices", exist_ok=True)
-    image.save(filename, "PNG", quality=95, dpi=(300, 300))
+    image.save(filename, "PNG", quality=100, dpi=(300, 300))
     return filename
 
 # ============================================================
@@ -299,7 +316,7 @@ async def send_link_to_channel(chat_id, product):
     )
 
 # ============================================================
-# 📤 نمایش لیست محصولات (عادی)
+# 📤 نمایش لیست محصولات
 # ============================================================
 
 async def show_products_list(message: Message, user_id: str):
@@ -330,7 +347,7 @@ async def show_products_list(message: Message, user_id: str):
     await message.reply_keypad(text, keypad)
 
 # ============================================================
-# 🔍 جستجوی زنده (Live Search)
+# 🔍 جستجوی زنده
 # ============================================================
 
 async def show_search_keypad(message: Message, user_id: str, bot: Robot):
@@ -701,7 +718,7 @@ async def handle_message(bot: Robot, message: Message):
                 return
 
 # ============================================================
-# 🎯 پردازش کلیک دکمه‌ها
+# 🎯 پردازش کلیک دکمه‌ها (اصلاح شده برای حذف از سبد خرید)
 # ============================================================
 
 @bot.on_callback()
@@ -819,16 +836,36 @@ async def handle_callback(bot: Robot, message: Message):
         await message.reply_keypad(text, keypad)
         return
     
+    # ============================================================
+    # ✅ اصلاح: حذف محصول از سبد خرید (بدون تکرار پیام)
+    # ============================================================
     if data.startswith('remove_'):
         product_name = data.replace('remove_', '')
+        # حذف محصول از سبد
         cart['items'] = [item for item in cart['items'] if item['name'] != product_name]
-        await message.reply(f"🗑️ {product_name} از سبد خرید حذف شد.")
-        await handle_callback(bot, message)
+        # ارسال پیام تأیید
+        await message.reply(f"🗑️ **{product_name}** از سبد خرید حذف شد.")
+        # نمایش سبد خرید به‌روز شده (بدون تکرار)
+        if len(cart['items']) == 0:
+            await message.reply("🛒 سبد خرید شما خالی است.")
+            menu_keypad = ChatKeypadBuilder() \
+                .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
+                .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
+                .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
+                .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
+                .build()
+            await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
+        else:
+            # نمایش مجدد سبد خرید به‌روز شده
+            await show_cart_internal(bot, message, user_id)
         return
     
+    # ============================================================
+    # ✅ اصلاح: خالی کردن سبد خرید (بدون تکرار پیام)
+    # ============================================================
     if data == 'clear_cart':
         cart['items'] = []
-        await message.reply("🗑️ سبد خرید شما خالی شد.")
+        await message.reply("🗑️ **سبد خرید شما خالی شد.**")
         menu_keypad = ChatKeypadBuilder() \
             .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
             .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
@@ -878,7 +915,43 @@ async def handle_callback(bot: Robot, message: Message):
     await message.reply("❌ دکمه نامعتبر!")
 
 # ============================================================
-# 🌐 Flask برای Keep-Alive (Render)
+# 🔧 تابع کمکی برای نمایش سبد خرید (بدون تکرار)
+# ============================================================
+
+async def show_cart_internal(bot: Robot, message: Message, user_id: str):
+    """نمایش سبد خرید به‌روز شده بدون تکرار"""
+    cart = get_cart(user_id)
+    if len(cart['items']) == 0:
+        await message.reply("🛒 سبد خرید شما خالی است!")
+        return
+    
+    text = "🛒 **سبد خرید شما:**\n\n"
+    total = 0
+    for i, item in enumerate(cart['items'], 1):
+        pair_count = item.get('pairCount', 1)
+        subtotal = item['price'] * pair_count * item['quantity']
+        total += subtotal
+        text += f"{i}. {item['name']}\n"
+        text += f"   تعداد کارتن: {item['quantity']}\n"
+        text += f"   تعداد جفت: {pair_count}\n"
+        text += f"   قیمت هر جفت: {format_price(item['price'])} تومان\n"
+        text += f"   مجموع: {format_price(subtotal)} تومان\n\n"
+    
+    text += f"━━━━━━━━━━━━━━━━\n"
+    text += f"💰 **جمع کل: {format_price(total)} تومان**\n\n"
+    
+    keypad_builder = ChatKeypadBuilder()
+    for i, item in enumerate(cart['items'], 1):
+        keypad_builder.row(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ حذف {item['name']}"))
+    keypad_builder.row(ChatKeypadBuilder().button(id="checkout", text="✅ نهایی‌سازی سفارش"))
+    keypad_builder.row(ChatKeypadBuilder().button(id="clear_cart", text="🗑️ خالی کردن سبد"))
+    keypad_builder.row(ChatKeypadBuilder().button(id="back_menu", text="🔙 بازگشت به منو"))
+    
+    keypad = keypad_builder.build()
+    await message.reply_keypad(text, keypad)
+
+# ============================================================
+# 🌐 Flask برای Keep-Alive
 # ============================================================
 
 app = Flask(__name__)
@@ -889,21 +962,18 @@ def home():
 
 @app.route('/ping')
 def ping():
-    """Endpoint برای Keep-Alive (cron-job.org یا UptimeRobot)"""
     return "OK", 200
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """در صورت نیاز به Webhook در آینده"""
     return jsonify({"status": "ok"}), 200
 
 def run_flask():
-    """اجرای Flask در یک ترد جداگانه"""
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # ============================================================
-# 🚀 اجرا (Flask + Polling همزمان)
+# 🚀 اجرا
 # ============================================================
 
 if __name__ == "__main__":
@@ -911,10 +981,8 @@ if __name__ == "__main__":
     os.makedirs('invoices', exist_ok=True)
     os.makedirs('payments', exist_ok=True)
     
-    # اجرای Flask در یک ترد جداگانه (برای پاسخ به درخواست‌های Keep-Alive)
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     
-    # اجرای ربات با Polling (همان کد قبلی)
     print("✅ ربات با Polling اجرا شد...")
     bot.run()
