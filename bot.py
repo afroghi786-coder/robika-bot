@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با ذخیره‌سازی و به‌روزرسانی قیمت
+# 🤖 ربات فروشگاهی - نسخه نهایی با Keep-Alive برای Render
 # ============================================================
 
 from rubka import Robot, Message
@@ -11,6 +11,9 @@ from PIL import Image, ImageDraw, ImageFont
 import arabic_reshaper
 from bidi.algorithm import get_display
 import json
+import threading
+import requests
+from flask import Flask, request, jsonify
 
 # ============================================================
 # 📦 ذخیره‌سازی دائمی محصولات (با قابلیت به‌روزرسانی قیمت)
@@ -40,7 +43,7 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 # 📦 حافظه
 # ============================================================
 
-all_products = load_products()  # ← بارگذاری از فایل
+all_products = load_products()
 carts = {}
 customer_debts = {}
 customer_codes = {}
@@ -532,11 +535,9 @@ async def handle_message(bot: Robot, message: Message):
             print("❌ محصول تشخیص داده نشد!")
             return
         
-        # ✅ بخش جدید: به‌روزرسانی قیمت در صورت تکراری بودن
         found = False
         for i, p in enumerate(all_products):
             if p['name'] == product['name']:
-                # به‌روزرسانی قیمت و تعداد جفت
                 all_products[i]['price'] = product['price']
                 all_products[i]['pairCount'] = product.get('pairCount', 0)
                 save_products(all_products)
@@ -877,11 +878,43 @@ async def handle_callback(bot: Robot, message: Message):
     await message.reply("❌ دکمه نامعتبر!")
 
 # ============================================================
-# 🚀 اجرا
+# 🌐 Flask برای Keep-Alive (Render)
+# ============================================================
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "✅ ربات فروشگاه فعال است!", 200
+
+@app.route('/ping')
+def ping():
+    """Endpoint برای Keep-Alive (cron-job.org یا UptimeRobot)"""
+    return "OK", 200
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """در صورت نیاز به Webhook در آینده"""
+    return jsonify({"status": "ok"}), 200
+
+def run_flask():
+    """اجرای Flask در یک ترد جداگانه"""
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+# ============================================================
+# 🚀 اجرا (Flask + Polling همزمان)
 # ============================================================
 
 if __name__ == "__main__":
-    print("✅ ربات فروشگاه روشن شد...")
+    print("✅ ربات فروشگاه در حال راه‌اندازی...")
     os.makedirs('invoices', exist_ok=True)
     os.makedirs('payments', exist_ok=True)
+    
+    # اجرای Flask در یک ترد جداگانه (برای پاسخ به درخواست‌های Keep-Alive)
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    
+    # اجرای ربات با Polling (همان کد قبلی)
+    print("✅ ربات با Polling اجرا شد...")
     bot.run()
