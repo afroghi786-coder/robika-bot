@@ -160,7 +160,7 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور نهایی - بازنویسی کامل
+# 🖼️ تولید فاکتور با جای‌نمایی دقیق
 # ============================================================
 
 def persian_text(text):
@@ -168,26 +168,23 @@ def persian_text(text):
     if not text:
         return ""
     try:
-        # مرحله 1: بازآرایی حروف (reshape)
         reshaped = arabic_reshaper.reshape(text)
-        # مرحله 2: راست‌چین کردن (bidi)
         return get_display(reshaped)
     except Exception as e:
-        # در صورت خطا، متن اصلی را برمی‌گردانیم
         print(f"⚠️ خطا در persian_text: {e}")
         return text
 
 def create_invoice_image(customer, items, total, previous_debt, invoice_number, customer_code):
     # =============================================
-    # 📐 ابعاد
+    # 📐 ابعاد با حاشیه‌های بزرگ
     # =============================================
     margin = 80
-    width = 3000
+    width = 3200
     row_height = 120
     header_height = 280
     customer_height = 200
     table_header_height = 100
-    footer_height = 300
+    footer_height = 280
     
     height = margin + header_height + customer_height + table_header_height + (len(items) * row_height) + 200 + footer_height + margin
     if previous_debt > 0:
@@ -245,7 +242,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         font_footer = ImageFont.load_default()
     
     # =============================================
-    # 📍 موقعیت‌ها (راست‌چین)
+    # 📍 موقعیت‌ها (راست‌چین) - اصلاح شده
     # =============================================
     y = margin + 40
     right_x = width - margin - 40
@@ -261,12 +258,14 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         except:
             pass
     
+    # عنوان و شماره با فاصله بیشتر
     draw.text((right_x - 400, y), persian_text("فاکتور فروش"), fill=(25, 70, 160), font=font_title)
-    draw.text((right_x - 450, y + 90), persian_text(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}"), fill=(100, 100, 100), font=font_header)
+    draw.text((right_x - 450, y + 95), persian_text(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}"), fill=(100, 100, 100), font=font_header)
     draw.text((right_x - 550, y), persian_text(f"شماره: {invoice_number}"), fill=(0, 0, 0), font=font_header)
-    draw.text((right_x - 450, y + 90), persian_text(f"کد مشتری: {customer_code}"), fill=(25, 70, 160), font=font_header)
+    draw.text((right_x - 450, y + 95), persian_text(f"کد مشتری: {customer_code}"), fill=(25, 70, 160), font=font_header)
     
-    y += 230
+    # افزایش فاصله برای جدا شدن از اطلاعات مشتری
+    y += 260
     
     # =============================================
     # 👤 اطلاعات مشتری
@@ -285,27 +284,31 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     y += 240
     
     # =============================================
-    # 📊 جدول محصولات (۶ ستون از راست)
+    # 📊 جدول محصولات (۶ ستون با عرض‌های دقیق)
     # =============================================
-    # موقعیت دقیق ستون‌ها
-    col1 = right_x - 60      # ردیف
-    col2 = right_x - 360     # نام مدل
-    col3 = right_x - 660     # جفت
-    col4 = right_x - 960     # کارتن
-    col5 = right_x - 1260    # قیمت هر جفت
-    col6 = right_x - 1590    # مبلغ کل
+    # عرض ستون‌ها از راست به چپ
+    col_widths = [80, 1400, 160, 160, 400, 600]  # ردیف، نام مدل، جفت، کارتن، قیمت هر جفت، مبلغ کل
+    
+    # محاسبه موقعیت‌ها از راست
+    col_pos = []
+    current = right_x
+    for w in col_widths:
+        col_pos.append(current - w)
+        current -= w
     
     # هدر جدول
     draw.rectangle(
         [(margin + 20, y), (width - margin - 20, y + 95)],
         fill=(25, 70, 160)
     )
-    draw.text((col1 - 45, y + 25), persian_text("ردیف"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col2 - 150, y + 25), persian_text("نام مدل"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col3 - 70, y + 25), persian_text("جفت"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col4 - 90, y + 25), persian_text("کارتن"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col5 - 120, y + 25), persian_text("قیمت هر جفت"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col6 - 120, y + 25), persian_text("مبلغ کل"), fill=(255, 255, 255), font=font_bold)
+    
+    # عنوان‌های ستون‌ها
+    draw.text((col_pos[0] + 15, y + 25), persian_text("ردیف"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col_pos[1] + 15, y + 25), persian_text("نام مدل"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col_pos[2] + 15, y + 25), persian_text("جفت"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col_pos[3] + 15, y + 25), persian_text("کارتن"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col_pos[4] + 15, y + 25), persian_text("قیمت هر جفت"), fill=(255, 255, 255), font=font_bold)
+    draw.text((col_pos[5] + 15, y + 25), persian_text("مبلغ کل"), fill=(255, 255, 255), font=font_bold)
     
     y += 95
     
@@ -316,12 +319,12 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
                 [(margin + 20, y), (width - margin - 20, y + 105)],
                 fill=(248, 250, 252)
             )
-        draw.text((col1 - 45, y + 30), str(i), fill=(0, 0, 0), font=font_normal)
-        draw.text((col2 - 150, y + 30), persian_text(item['name'][:45]), fill=(0, 0, 0), font=font_normal)
-        draw.text((col3 - 70, y + 30), str(item['pairCount']), fill=(0, 0, 0), font=font_normal)
-        draw.text((col4 - 90, y + 30), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
-        draw.text((col5 - 120, y + 30), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
-        draw.text((col6 - 120, y + 30), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
+        draw.text((col_pos[0] + 15, y + 30), str(i), fill=(0, 0, 0), font=font_normal)
+        draw.text((col_pos[1] + 15, y + 30), persian_text(item['name'][:50]), fill=(0, 0, 0), font=font_normal)
+        draw.text((col_pos[2] + 15, y + 30), str(item['pairCount']), fill=(0, 0, 0), font=font_normal)
+        draw.text((col_pos[3] + 15, y + 30), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
+        draw.text((col_pos[4] + 15, y + 30), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
+        draw.text((col_pos[5] + 15, y + 30), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
         y += 105
     
     # خط جداکننده
@@ -333,7 +336,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     y += 70
     
     # =============================================
-    # 💰 جمع‌بندی (فقط جمع و مبلغ قابل پرداخت)
+    # 💰 جمع‌بندی
     # =============================================
     draw.text((right_x - 500, y), persian_text(f"جمع سفارش جدید: {format_price(total)} تومان"), fill=(25, 70, 160), font=font_bold)
     y += 100
