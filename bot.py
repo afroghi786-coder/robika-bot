@@ -158,12 +158,17 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور با کیفیت بالا (اصلاح‌شده برای فارسی)
+# 🖼️ تولید فاکتور با کیفیت بالا (اصلاح نهایی فارسی)
 # ============================================================
 
 def persian_text(text):
     """تبدیل متن فارسی به شکل قابل نمایش در PIL با راست‌چین"""
-    return get_display(arabic_reshaper.reshape(text))
+    if not text:
+        return ""
+    # reshape و bidi برای نمایش صحیح فارسی
+    reshaped = arabic_reshaper.reshape(text)
+    bidi_text = get_display(reshaped)
+    return bidi_text
 
 def create_invoice_image(customer, items, total, previous_debt, invoice_number, customer_code):
     # افزایش ابعاد برای کیفیت بالاتر
@@ -175,19 +180,20 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     image = Image.new('RGB', (width, height), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
     
-    # لیست گسترده‌تر از فونت‌های زیبا
+    # اولویت فونت‌های یونیکد که از فارسی پشتیبانی می‌کنند
     font_paths = [
-        # فونت‌های استاندارد لینوکس/یونیکس
+        # فونت‌های استاندارد لینوکس/یونیکس (اولویت بالاتر)
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
         # فونت‌های ویندوز (برای محیط محلی)
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/tahoma.ttf",
         "C:/Windows/Fonts/B_Nazanin.ttf",
         "C:/Windows/Fonts/B_Titr.ttf",
         "C:/Windows/Fonts/B_Yas.ttf",
         "C:/Windows/Fonts/B_Mitra.ttf",
         "C:/Windows/Fonts/B_Koodak.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/tahoma.ttf",
         # فونت‌های مک (اختیاری)
         "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Tahoma.ttf"
@@ -206,13 +212,15 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
             font_normal = ImageFont.truetype(font_found, 34)
             font_bold = ImageFont.truetype(font_found, 38)
             font_footer = ImageFont.truetype(font_found, 48)
-        except:
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری فونت {font_found}: {e}")
             font_title = ImageFont.load_default()
             font_header = ImageFont.load_default()
             font_normal = ImageFont.load_default()
             font_bold = ImageFont.load_default()
             font_footer = ImageFont.load_default()
     else:
+        print("⚠️ هیچ فونت فارسی‌پذیری یافت نشد، از فونت پیش‌فرض استفاده می‌شود.")
         font_title = ImageFont.load_default()
         font_header = ImageFont.load_default()
         font_normal = ImageFont.load_default()
@@ -256,7 +264,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     y += 80
     
-    # آیتم‌های محصولات
+    # آیتم‌های محصولات (اعداد و قیمت‌ها بدون تغییر)
     for i, item in enumerate(items, 1):
         if i % 2 == 0:
             draw.rectangle([(40, y), (1960, y+85)], fill=(240, 240, 240))
@@ -720,7 +728,7 @@ async def handle_message(bot: Robot, message: Message):
                 return
 
 # ============================================================
-# 🎯 پردازش کلیک دکمه‌ها (اصلاح شده برای حذف از سبد خرید)
+# 🎯 پردازش کلیک دکمه‌ها
 # ============================================================
 
 @bot.on_callback()
@@ -838,9 +846,7 @@ async def handle_callback(bot: Robot, message: Message):
         await message.reply_keypad(text, keypad)
         return
     
-    # ============================================================
-    # ✅ اصلاح: حذف محصول از سبد خرید (بدون تکرار پیام)
-    # ============================================================
+    # ✅ حذف محصول از سبد خرید (بدون تکرار)
     if data.startswith('remove_'):
         product_name = data.replace('remove_', '')
         cart['items'] = [item for item in cart['items'] if item['name'] != product_name]
@@ -858,9 +864,7 @@ async def handle_callback(bot: Robot, message: Message):
             await show_cart_internal(bot, message, user_id)
         return
     
-    # ============================================================
-    # ✅ اصلاح: خالی کردن سبد خرید (بدون تکرار پیام)
-    # ============================================================
+    # ✅ خالی کردن سبد خرید (بدون تکرار)
     if data == 'clear_cart':
         cart['items'] = []
         await message.reply("🗑️ **سبد خرید شما خالی شد.**")
