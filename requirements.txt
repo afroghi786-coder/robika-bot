@@ -1,5 +1,5 @@
 rubka==0.1.0
-Pillow==10.1.0
+Pillow>=10.4.0
 arabic-reshaper==3.0.0
 python-bidi==0.4.2
 Flask==2.3.3
