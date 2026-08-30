@@ -211,7 +211,7 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"  # ← شناسه چت حسا
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycb.../exec"  # ← آدرس Webhook خود را قرار دهید
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzp6NTuFqIxEGa7vcb35tGtGALEe230nvkVT-TZVdOFw0PBGrQAL6Yl71ge8QvJyGiLPg/exec"  # ← آدرس Webhook خود را قرار دهید
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     """ارسال سفارش به Webhook - هر محصول یک ردیف"""
