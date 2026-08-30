@@ -413,7 +413,7 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور (راست‌به‌چپ + حذف ایموجی مربع)
+# 🖼️ تولید فاکتور (استاندارد فارسی: ردیف، نام، کارتن، جفت، قیمت، مبلغ)
 # ============================================================
 
 def persian_text(text):
@@ -494,13 +494,12 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     y += 250
     
-    # ---- جدول (راست به چپ) ----
+    # ---- جدول (راست به چپ: ردیف، نام، کارتن، جفت، قیمت، مبلغ) ----
     table_left = margin + 20
     table_right = width - margin - 20
-    total_table_width = table_right - table_left
     
-    # تنظیم عرض ستون‌ها
-    col_widths = [600, 450, 200, 200, 1000, 100]  # [مبلغ کل, قیمت هر جفت, جفت, کارتن, نام مدل, ردیف]
+    # تنظیم عرض ستون‌ها برای استاندارد فارسی
+    col_widths = [100, 1000, 200, 200, 450, 600]  # [ردیف, نام مدل, کارتن, جفت, قیمت, مبلغ]
     
     # محاسبه مختصات مرکز هر ستون از راست به چپ
     col_centers = []
@@ -511,7 +510,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     # هدر جدول (از راست به چپ)
     draw.rectangle([(table_left, y), (table_right, y + 100)], fill=(25, 70, 160))
-    headers = ["مبلغ کل", "قیمت هر جفت", "جفت", "کارتن", "نام مدل", "ردیف"]
+    headers = ["ردیف", "نام مدل", "کارتن", "جفت", "قیمت هر جفت", "مبلغ کل"]
     for i, h in enumerate(headers):
         draw.text((col_centers[i], y + 50), persian_text(h), fill=(255, 255, 255), font=font_bold, anchor="mm")
     
@@ -522,12 +521,12 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         if i % 2 == 0:
             draw.rectangle([(table_left, y), (table_right, y + 110)], fill=(248, 250, 252))
         
-        draw.text((col_centers[0], y + 55), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal, anchor="mm")
-        draw.text((col_centers[1], y + 55), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal, anchor="mm")
-        draw.text((col_centers[2], y + 55), str(item['pairCount']), fill=(0, 0, 0), font=font_normal, anchor="mm")
-        draw.text((col_centers[3], y + 55), str(item['quantity']), fill=(0, 0, 0), font=font_normal, anchor="mm")
-        draw.text((col_centers[4], y + 55), persian_text(item['name'][:50]), fill=(0, 0, 0), font=font_normal, anchor="mm")
-        draw.text((col_centers[5], y + 55), str(i), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[0], y + 55), str(i), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[1], y + 55), persian_text(item['name'][:50]), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[2], y + 55), str(item['quantity']), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[3], y + 55), str(item['pairCount']), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[4], y + 55), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[5], y + 55), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal, anchor="mm")
         
         y += 110
     
