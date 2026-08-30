@@ -253,7 +253,258 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw8wjotFGN_ZUZaFKo9_dywep28Ziz-juWWCcB3Sg5N15VD0LLOPZoZR_bqw2nYRyDAfg/exec"
+WEBHOOK_URL = "// ============================================================
+// 📥 Webhook برای ثبت سفارش، واریزی، دریافت شماره فاکتور و کد مشتری
+// (نسخه نهایی - دقیقاً بر اساس کد انتقال_به_فروش و درخواست‌های شما)
+// ============================================================
+
+function doPost(e) {
+  try {
+    const data = JSON.parse(e.postData.contents);
+    const action = data.action || 'register';
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName("فروش");
+    if (!sheet) {
+      sheet = ss.insertSheet("فروش");
+      const headers = [
+        "تاریخ_فاکتور", "تاریخ_ثبت", "شماره_فاکتور", "کد_مشتری", "نام_مشتری",
+        "تلفن_مشتری", "آدرس_مشتری", "کد_مدل", "نام_مدل", "موجودی_ انبار",
+        "تعداد", "قیمت_واحد", "ملبغ", "مبلغ کل", "پرداخت_نقدی",
+        "بدهکار/بستانکار", "الباقی از قبل", "شرح", "تاریخ_ واریزی",
+        "مبلغ واریزی", "شماره حساب", "نام_ صاحب حساب ", "کد_صاحب حساب",
+        "مبلغ(چک)", "چک(شماره سند)", "کل_فروش", "کل_واریزی", "کل_بدهی",
+        "نام _بابری", "وضعیت پرینت"
+      ];
+      sheet.appendRow(headers);
+    }
+
+    // تابع کمکی برای اصلاح شماره تماس (دقیقاً مثل کد خودتان + حل صفر)
+    function normalizePhone(phone) {
+      phone = String(phone).trim().replace(/\s+/g, "");
+      if (phone.startsWith("+98")) phone = "0" + phone.substring(3);
+      else if (phone.startsWith("0098")) phone = "0" + phone.substring(4);
+      else if (phone.startsWith("98") && phone.length == 12) phone = "0" + phone.substring(2);
+      else if (phone.startsWith("9") && phone.length == 10) phone = "0" + phone; // اضافه کردن صفر به 902...
+      return phone;
+    }
+
+    // تابع کمکی برای پیدا کردن بیشترین کد M_ موجود در شیت
+    function getMaxCustomerCode() {
+      const records = sheet.getDataRange().getValues();
+      let maxCode = 3124; 
+      for (let i = 1; i < records.length; i++) {
+        let code = String(records[i][3]); 
+        if (code.startsWith("M_")) {
+          try {
+            let num = parseInt(code.replace("M_", ""));
+            if (num > maxCode) maxCode = num;
+          } catch (e) {}
+        }
+      }
+      return maxCode;
+    }
+
+    // ============================================================
+    // 🆕 دریافت شماره فاکتور جدید (از خود شیت)
+    // ============================================================
+    if (action === 'get_next_invoice') {
+      const records = sheet.getDataRange().getValues();
+      let maxNum = 0;
+      const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyyMMdd");
+
+      for (let i = 1; i < records.length; i++) {
+        let val = String(records[i][2]); 
+        if (val.startsWith("M_")) {
+          try {
+            let parts = val.split("_");
+            if (parts.length >= 2 && parts[1].length === 12) {
+              let num = parseInt(parts[1].substring(8));
+              if (num > maxNum) maxNum = num;
+            }
+          } catch (e) {}
+        }
+      }
+
+      let nextNum = maxNum + 1;
+      let nextInvoice = "M_" + today + ("000" + nextNum).slice(-4);
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        invoice_number: nextInvoice
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ============================================================
+    // 🆕 دریافت یا ایجاد کد مشتری (بدون اضافه کردن ردیف خالی)
+    // ============================================================
+    if (action === 'get_or_create_customer') {
+      let phone = normalizePhone(data.phone || '');
+      
+      if (!phone || phone.length < 11) {
+        return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "شماره تماس معتبر نیست!" })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      const records = sheet.getDataRange().getValues();
+      let existingCode = null;
+
+      for (let i = 1; i < records.length; i++) {
+        let currentPhone = normalizePhone(records[i][5]); // ستون F
+        let currentCode = String(records[i][3]); // ستون D
+
+        if (currentPhone === phone && currentCode !== "") {
+          existingCode = currentCode;
+          break;
+        }
+      }
+
+      if (existingCode) {
+        return ContentService.createTextOutput(JSON.stringify({ status: "success", customer_code: existingCode })).setMimeType(ContentService.MimeType.JSON);
+      } else {
+        let nextCode = "M_" + (getMaxCustomerCode() + 1);
+        return ContentService.createTextOutput(JSON.stringify({ status: "success", customer_code: nextCode })).setMimeType(ContentService.MimeType.JSON);
+      }
+    }
+
+    // ============================================================
+    // 📦 ثبت سفارش جدید (الگوبرداری ۱۰۰٪ از انتقال_به_فروش)
+    // ============================================================
+    if (action === 'register') {
+      const items = data.items || [];
+      if (items.length === 0) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: "❌ هیچ محصولی در سفارش وجود ندارد!"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      const rows = [];
+      const invoiceNumber = data.invoice_number || '';
+      const totalAmount = data.total || 0;
+      const customerCode = data.customer_code || '';
+      const customerName = data.customer_name || '';
+      let customerPhone = normalizePhone(data.customer_phone || '');
+      const customerAddress = data.customer_address || '';
+      const customerShipping = data.customer_shipping || '';
+      const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy/MM/dd HH:mm:ss");
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const row = Array(29).fill("");
+
+        // اطلاعات مشتری در تمام ردیف‌ها
+        row[1] = timestamp;             // B: تاریخ ثبت
+        row[2] = invoiceNumber;         // C: شماره فاکتور
+        row[3] = customerCode;          // D: کد مشتری
+        row[4] = customerName;          // E: نام مشتری
+        row[5] = customerPhone;         // F: تلفن (با صفر)
+        row[6] = customerAddress;       // G: آدرس
+        row[28] = customerShipping;     // AC: باربری
+        
+        // فقط مبلغ کل و بدهی در ردیف اول
+        if (i === 0) {
+          row[13] = totalAmount;        // N: مبلغ کل
+          row[15] = totalAmount;        // P: بدهکار
+        }
+
+        // اطلاعات محصول
+        row[8] = item.name || '';        // I: نام محصول
+        row[10] = item.pairCount || 0;   // K: تعداد جفت (طبق خواسته شما)
+        row[11] = item.price_per_pair || 0; // L: قیمت هر جفت
+        row[12] = item.subtotal || 0;    // M: مبلغ ردیف
+        row[29] = "ارسال شد";            // AD: وضعیت پرینت
+
+        rows.push(row);
+      }
+
+      if (rows.length > 0) {
+        const startRow = sheet.getLastRow() + 1;
+        sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: `✅ سفارش با ${rows.length} محصول ثبت شد!`
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // ============================================================
+    // 💳 ثبت واریزی (همان نسخه نهایی مورد توافق)
+    // ============================================================
+    if (action === 'update_payment') {
+      const invoiceNumber = data.invoice_number;
+      const paymentAmount = data.payment_amount;
+      const accountNumber = data.account_number || '';
+      const accountHolder = data.account_holder || '';
+
+      if (!invoiceNumber || !paymentAmount) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: "❌ شماره فاکتور یا مبلغ واریزی ارسال نشده است!"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      const records = sheet.getDataRange().getValues();
+      let customerInfo = null;
+      for (let i = 1; i < records.length; i++) {
+        if (String(records[i][2]) === String(invoiceNumber)) { // C
+          customerInfo = {
+            code: String(records[i][3] || ''), // D
+            name: records[i][4] || '',   // E
+            phone: normalizePhone(records[i][5]), // F
+            address: records[i][6] || '',// G
+            shipping: records[i][28] || '' // AC
+          };
+          break;
+        }
+      }
+
+      if (!customerInfo) {
+        return ContentService.createTextOutput(JSON.stringify({
+          status: "error",
+          message: "❌ فاکتور پیدا نشد!"
+        })).setMimeType(ContentService.MimeType.JSON);
+      }
+
+      const newRow = Array(29).fill("");
+      newRow[1] = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy/MM/dd HH:mm:ss"); // B: تاریخ ثبت
+      newRow[2] = invoiceNumber;          // C
+      newRow[3] = customerInfo.code;      // D
+      newRow[4] = customerInfo.name;      // E
+      newRow[5] = customerInfo.phone;     // F
+      newRow[6] = customerInfo.address;   // G
+      newRow[14] = paymentAmount;         // O
+      newRow[18] = '';                    // S (خالی برای حسابدار)
+      newRow[20] = accountNumber;         // U
+      newRow[21] = accountHolder;         // V
+      newRow[28] = customerInfo.shipping; // AC
+      newRow[29] = "ارسال شد";            // AD
+
+      sheet.appendRow(newRow);
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: "success",
+        message: `✅ واریزی ${paymentAmount.toLocaleString('fa-IR')} تومان برای فاکتور ${invoiceNumber} ثبت شد.`
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: "❌ اقدام نامعتبر!"
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (error) {
+    Logger.log("❌ خطا: " + error.message);
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "error",
+      message: "❌ خطا: " + error.message
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet() {
+  return ContentService.createTextOutput("✅ Webhook فروشگاه فعال است!");
+}"
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     try:
