@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با حل کامل مشکلات
+# 🤖 ربات فروشگاهی - نسخه نهایی با حل کامل مشکلات (منطق بدهی منفی + ذخیره دائمی)
 # ============================================================
 
 from rubka import Robot, Message
@@ -115,14 +115,17 @@ def get_existing_customer_data():
         return {}, 3000
 
 # ============================================================
-# 📦 مدیریت داده‌های پایدار (شمارنده‌ها)
+# 📦 مدیریت داده‌های پایدار (شمارنده‌ها + بدهی‌ها + فاکتور ادمین)
 # ============================================================
 
 def load_data():
     default_data = {
         "invoice_counter": 0,
         "customer_counter": 3000,
-        "customer_codes": {}
+        "customer_codes": {},
+        # ⬇️ اضافه شده برای ذخیره دائمی بدهی‌ها و فاکتورهای ادمین
+        "customer_debts": {},
+        "last_invoice_for_admin": {}
     }
     if os.path.exists(DATA_FILE):
         try:
@@ -131,6 +134,8 @@ def load_data():
                 data.setdefault("invoice_counter", 0)
                 data.setdefault("customer_counter", 3000)
                 data.setdefault("customer_codes", {})
+                data.setdefault("customer_debts", {})
+                data.setdefault("last_invoice_for_admin", {})
                 return data
         except:
             return default_data
@@ -156,6 +161,9 @@ if max_code > data.get("customer_counter", 3000):
 invoice_counter = data.get("invoice_counter", 0)
 customer_counter = data.get("customer_counter", 3000)
 customer_codes = data.get("customer_codes", {})
+# ⬇️ بارگذاری از فایل دائمی
+customer_debts = data.get("customer_debts", {})
+last_invoice_for_admin = data.get("last_invoice_for_admin", {})
 
 # ============================================================
 # 🔗 توابع ارتباط با وب‌هوک گوگل‌شیت (منطق جدید)
@@ -253,7 +261,7 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyGuEHRJJSKVyp_0RrXc7S5BXK_C2O2e1opukP1fwnK8sYN9gETa9ASJvDDjZkrf0cVqg/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxTeCSdRRB4YXI5I1F9Q-tUh25lI4ZKax0zMvCixMhPm3TDWbJ2iVlbWeUXlXITCbqkhg/exec"
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     try:
@@ -309,8 +317,7 @@ def به‌روزرسانی_واریزی_در_شیت(invoice_number, payment_amo
 
 all_products = load_products()
 carts = {}
-customer_debts = {}
-last_invoice_for_admin = {}
+# ⬇️ دیگر از RAM استفاده نمی‌شود، از data.json خوانده می‌شود
 
 PERSIAN_LETTERS = [
     'ا', 'ب', 'پ', 'ت', 'ث', 'ج', 'چ', 'ح', 'خ', 'د', 'ذ', 'ر', 'ز', 'ژ',
@@ -394,6 +401,9 @@ def extract_amount(text):
 def format_price(num):
     if not num:
         return "0"
+    # برای نمایش اعداد منفی (بستانکار) با علامت منفی
+    if num < 0:
+        return f"-{abs(num):,}".replace(',', '٬')
     return f"{num:,}".replace(',', '٬')
 
 def add_to_cart(user_id, product, quantity):
@@ -413,7 +423,7 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور (استاندارد فارسی: ردیف، نام، کارتن، جفت، قیمت، مبلغ)
+# 🖼️ تولید فاکتور (استاندارد فارسی)
 # ============================================================
 
 def persian_text(text):
@@ -494,21 +504,18 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     y += 250
     
-    # ---- جدول (راست به چپ: ردیف، نام، کارتن، جفت، قیمت، مبلغ) ----
+    # ---- جدول (راست به چپ) ----
     table_left = margin + 20
     table_right = width - margin - 20
     
-    # تنظیم عرض ستون‌ها برای استاندارد فارسی
-    col_widths = [100, 1000, 200, 200, 450, 600]  # [ردیف, نام مدل, کارتن, جفت, قیمت, مبلغ]
+    col_widths = [100, 1000, 200, 200, 450, 600]
     
-    # محاسبه مختصات مرکز هر ستون از راست به چپ
     col_centers = []
     current = table_right
     for w in col_widths:
         col_centers.append(current - w // 2)
         current -= w
     
-    # هدر جدول (از راست به چپ)
     draw.rectangle([(table_left, y), (table_right, y + 100)], fill=(25, 70, 160))
     headers = ["ردیف", "نام مدل", "کارتن", "جفت", "قیمت هر جفت", "مبلغ کل"]
     for i, h in enumerate(headers):
@@ -516,7 +523,6 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     
     y += 100
     
-    # ردیف‌های جدول
     for i, item in enumerate(items, 1):
         if i % 2 == 0:
             draw.rectangle([(table_left, y), (table_right, y + 110)], fill=(248, 250, 252))
@@ -536,15 +542,17 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     # ---- فوتر ----
     draw.text((right_x, y), persian_text(f"جمع سفارش جدید: {format_price(total)} تومان"), fill=(25, 70, 160), font=font_bold, anchor="rm")
     y += 110
-    if previous_debt > 0:
-        draw.text((right_x, y), persian_text(f"بدهی قبلی: {format_price(previous_debt)} تومان"), fill=(200, 50, 50), font=font_bold, anchor="rm")
+    if previous_debt != 0:
+        if previous_debt < 0:
+            draw.text((right_x, y), persian_text(f"بستانکاری قبلی: {format_price(previous_debt)} تومان"), fill=(200, 50, 50), font=font_bold, anchor="rm")
+        else:
+            draw.text((right_x, y), persian_text(f"بدهی قبلی: {format_price(previous_debt)} تومان"), fill=(200, 50, 50), font=font_bold, anchor="rm")
         y += 110
         draw.text((right_x, y), persian_text(f"مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان"), fill=(0, 150, 0), font=font_bold, anchor="rm")
     else:
         draw.text((right_x, y), persian_text(f"مبلغ قابل پرداخت: {format_price(total)} تومان"), fill=(0, 150, 0), font=font_bold, anchor="rm")
     
     y += 200
-    # حذف ایموجی برای جلوگیری از نمایش مربع
     draw.text((width // 2, y), persian_text("از اعتماد شما سپاسگزاریم!"), fill=(150, 150, 150), font=font_footer, anchor="mm")
     
     filename = f"invoices/invoice_{invoice_number}.png"
@@ -674,7 +682,7 @@ async def show_search_keypad(message: Message, user_id: str, bot: Robot):
 # ============================================================
 
 async def finalize_order(message: Message, user_id: str, bot: Robot):
-    global customer_debts, last_invoice_for_admin
+    global customer_debts, last_invoice_for_admin, data
     cart = get_cart(user_id)
     customer = cart['customer']
     if len(cart['items']) == 0:
@@ -704,6 +712,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
             'price_per_pair': item['price'],
             'subtotal': subtotal
         })
+    # ⬇️ خواندن بدهی از فایل دائمی
     previous_debt = customer_debts.get(user_id, 0)
     total_payable = previous_debt + total
     invoice_number = generate_invoice_number()
@@ -743,6 +752,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
         )
         if os.path.exists(image_path):
             os.remove(image_path)
+        # ⬇️ ذخیره دائمی فاکتور ادمین
         last_invoice_for_admin[user_id] = {
             'message_id': admin_msg.message_id,
             'chat_id': ADMIN_CHAT_ID,
@@ -750,11 +760,16 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
             'total_payable': total_payable,
             'invoice_number': invoice_number
         }
+        data["last_invoice_for_admin"] = last_invoice_for_admin
+        save_data(data)
         print(f"✅ فاکتور به حسابدار ارسال شد برای کاربر {user_id} با message_id: {admin_msg.message_id}")
     except Exception as e:
         print(f"⚠️ خطا در ارسال فاکتور به حسابدار: {e}")
     ثبت_سفارش_در_شیت(customer, items_list, total, invoice_number, customer_code)
+    # ⬇️ ذخیره دائمی بدهی
     customer_debts[user_id] = total_payable
+    data["customer_debts"] = customer_debts
+    save_data(data)
     cart['items'] = []
     cart['customer'] = {}
     cart['step'] = 'idle'
@@ -768,7 +783,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
         "✅ **سفارش شما با موفقیت ثبت شد!**\n\n"
         f"🆔 **کد مشتری شما: {customer_code}**\n"
         "🔄 برای سفارش جدید، از منوی زیر استفاده کنید.\n"
-        f"💳 **بدهی شما: {format_price(total_payable)} تومان**\n\n"
+        f"💳 **وضعیت حساب شما: {format_price(total_payable)} تومان**\n\n"
         "📱 **برای تسویه حساب، پیامک تراکنش را همراه با مبلغ به این حساب ارسال کنید.**",
         menu_keypad
     )
@@ -873,6 +888,7 @@ async def handle_message(bot: Robot, message: Message):
             if message.reply_to_message_id:
                 found_user = None
                 found_info = None
+                # ⬇️ جستجو در حافظه دائمی
                 for uid, info in last_invoice_for_admin.items():
                     if info['message_id'] == message.reply_to_message_id:
                         found_user = uid
@@ -881,21 +897,31 @@ async def handle_message(bot: Robot, message: Message):
                 if found_user and found_info:
                     amount = extract_amount(text)
                     if amount:
+                        # ⬇️ فرمول جدید بدهی منفی (بستانکار)
                         current_debt = customer_debts.get(found_user, 0)
-                        new_debt = max(0, current_debt - amount)
+                        new_debt = current_debt - amount
+                        
                         customer_debts[found_user] = new_debt
+                        data["customer_debts"] = customer_debts
+                        save_data(data)
+                        
+                        if new_debt < 0:
+                            debt_status = f"بستانکاری: {format_price(abs(new_debt))} تومان"
+                        else:
+                            debt_status = f"بدهی: {format_price(new_debt)} تومان"
+                            
                         await message.reply(
                             f"✅ **تسویه حساب انجام شد!**\n\n"
                             f"👤 کاربر: {found_info['user_name']}\n"
                             f"💰 مبلغ واریز: {format_price(amount)} تومان\n"
-                            f"💳 بدهی جدید: {format_price(new_debt)} تومان"
+                            f"💳 وضعیت حساب: {debt_status}"
                         )
                         try:
                             await bot.send_message(
                                 chat_id=found_user,
                                 text=f"✅ **تسویه حساب شما تایید شد!**\n"
                                      f"💰 مبلغ واریز: {format_price(amount)} تومان\n"
-                                     f"💳 بدهی جدید: {format_price(new_debt)} تومان"
+                                     f"💳 وضعیت حساب: {debt_status}"
                             )
                         except Exception as e:
                             print(f"⚠️ خطا در ارسال پیام به کاربر: {e}")
