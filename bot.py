@@ -693,7 +693,7 @@ async def handle_message(bot: Robot, message: Message):
     user_id = message.author_guid
     text = message.text if message.text else ''
     
-    if chat_id.startswith('c0'):
+      if chat_id.startswith('c0'):
         product = detect_product(text)
         if not product:
             return
@@ -709,9 +709,9 @@ async def handle_message(bot: Robot, message: Message):
         if not found:
             all_products.append(product)
             save_products(all_products)
-        await bot.send_message(chat_id=chat_id, text=f"✅ {product['name']} به دسته **{product['category']}** اضافه شد.")
+        # ✅ تغییر اصلی: برگرداندن لینک به جای پیام دسته
+        await send_link_to_channel(chat_id, product)
         return
-
     if chat_id.startswith('b0'):
         cart = get_cart(user_id)
         if text == '/start' or text == 'start':
