@@ -43,7 +43,6 @@ def get_last_invoice_number_from_sheet():
         records = sheet.get_all_values()
         if len(records) < 2:
             return 0
-        # پیدا کردن ستون شماره_فاکتور
         header = records[0]
         col_invoice = None
         for i, h in enumerate(header):
@@ -119,7 +118,6 @@ def load_data():
         try:
             with open(DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # اطمینان از وجود کلیدها
                 data.setdefault("invoice_counter", 0)
                 data.setdefault("customer_counter", 3000)
                 data.setdefault("customer_codes", {})
@@ -134,7 +132,6 @@ def save_data(data):
 
 # بارگذاری داده‌ها در شروع
 data = load_data()
-# تنظیم شمارنده فاکتور بر اساس بزرگترین شماره موجود در شیت
 last_invoice = get_last_invoice_number_from_sheet()
 if last_invoice > data.get("invoice_counter", 0):
     data["invoice_counter"] = last_invoice
@@ -145,7 +142,7 @@ customer_counter = data.get("customer_counter", 3000)
 customer_codes = data.get("customer_codes", {})
 
 # ============================================================
-# 📦 توابع تولید شماره فاکتور و کد مشتری (اصلاح‌شده)
+# 📦 توابع تولید شماره فاکتور و کد مشتری
 # ============================================================
 
 def generate_invoice_number():
@@ -159,12 +156,8 @@ def generate_invoice_number():
 def get_or_create_customer_code(phone):
     global customer_counter, customer_codes, data
     phone = phone.replace(' ', '').replace('-', '')
-    
-    # ابتدا از دیکشنری محلی چک کن
     if phone in customer_codes:
         return customer_codes[phone]
-    
-    # از شیت فروش بخوان
     phone_to_code, max_code = get_existing_customer_data()
     if phone in phone_to_code:
         code = phone_to_code[phone]
@@ -172,9 +165,6 @@ def get_or_create_customer_code(phone):
         data["customer_codes"] = customer_codes
         save_data(data)
         return code
-    
-    # شماره جدید است → کد جدید بساز
-    # از max_code استفاده کن (بزرگترین کد موجود در شیت)
     if max_code > customer_counter:
         customer_counter = max_code
     customer_counter += 1
@@ -205,16 +195,15 @@ def save_products(products):
 
 TOKEN = os.environ.get("TOKEN", "")
 BOT_USERNAME = "FroghiShopBot"
-ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"  # ← شناسه چت حسابدار
+ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 
 # ============================================================
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzp6NTuFqIxEGa7vcb35tGtGALEe230nvkVT-TZVdOFw0PBGrQAL6Yl71ge8QvJyGiLPg/exec"  # ← آدرس Webhook خود را قرار دهید
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycb.../exec"  # ← آدرس Webhook خود را قرار دهید
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
-    """ارسال سفارش به Webhook - هر محصول یک ردیف"""
     try:
         payload = {
             "action": "register",
@@ -247,7 +236,6 @@ def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, custom
         return False
 
 def به‌روزرسانی_واریزی_در_شیت(invoice_number, payment_amount, account_number="", account_holder=""):
-    """ارسال واریزی به Webhook (هر واریزی یک ردیف)"""
     try:
         payload = {
             "action": "update_payment",
@@ -366,7 +354,7 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور (بدون تغییر)
+# 🖼️ تولید فاکتور
 # ============================================================
 
 def persian_text(text):
@@ -699,20 +687,363 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     )
 
 # ============================================================
-# 🤖 ساخت ربات و هندلرها (بدون تغییر)
+# 🤖 ساخت ربات و هندلرها (کامل)
 # ============================================================
 
 bot = Robot(token=TOKEN)
 
 @bot.on_message()
 async def handle_message(bot: Robot, message: Message):
-    # (بدون تغییر، از کد قبلی استفاده کنید)
-    pass
+    chat_id = message.chat_id
+    user_id = message.author_guid
+    text = message.text if message.text else ''
+    print(f"📩 پیام از: {chat_id}")
+    print(f"📝 متن: {text[:100] if text else '(خالی)'}")
+    if chat_id.startswith('c0'):
+        product = detect_product(text)
+        if not product:
+            print("❌ محصول تشخیص داده نشد!")
+            return
+        found = False
+        for i, p in enumerate(all_products):
+            if p['name'] == product['name']:
+                all_products[i]['price'] = product['price']
+                all_products[i]['pairCount'] = product.get('pairCount', 0)
+                save_products(all_products)
+                print(f"🔄 قیمت محصول {product['name']} به {format_price(product['price'])} تومان به‌روز شد!")
+                found = True
+                break
+        if not found:
+            all_products.append(product)
+            save_products(all_products)
+            print(f"✅ محصول جدید: {product['name']} - قیمت: {format_price(product['price'])}")
+        await send_link_to_channel(chat_id, product)
+        return
+    if chat_id.startswith('b0'):
+        cart = get_cart(user_id)
+        if text == '/start' or text == 'start':
+            menu_keypad = ChatKeypadBuilder() \
+                .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
+                .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
+                .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
+                .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
+                .build()
+            await message.reply_keypad(
+                "🏠 **به فروشگاه خوش آمدید!**\n\nاز منوی زیر انتخاب کنید:",
+                menu_keypad
+            )
+            return
+        if text == '/myid':
+            await message.reply(f"🆔 **آیدی عددی شما:**\n`{user_id}`\n\n🔹 شناسه چت شما: `{chat_id}`")
+            return
+        if cart['step'] == 'waiting_quantity':
+            try:
+                quantity = int(convert_persian_number(text))
+            except:
+                await message.reply("❌ لطفاً یک عدد معتبر وارد کنید.")
+                return
+            if quantity < 1:
+                await message.reply("❌ عدد باید بزرگتر از صفر باشد.")
+                return
+            product = cart.get('selected_product')
+            if not product:
+                await message.reply("❌ خطا! دوباره محصول را انتخاب کنید.")
+                cart['step'] = 'idle'
+                return
+            success, msg = add_to_cart(user_id, product, quantity)
+            await message.reply(msg)
+            if success:
+                cart['step'] = 'idle'
+                cart['selected_product'] = None
+                await show_products_list(message, user_id)
+            return
+        if cart['step'] == 'waiting_customer_name':
+            cart['customer']['name'] = text
+            cart['step'] = 'waiting_customer_phone'
+            await message.reply("📞 **شماره تماس** خود را وارد کنید (۱۱ رقم):")
+            return
+        if cart['step'] == 'waiting_customer_phone':
+            phone = convert_persian_number(text).replace(' ', '').replace('-', '')
+            if len(phone) < 11:
+                await message.reply("❌ شماره تماس معتبر نیست. حداقل ۱۱ رقم وارد کنید.")
+                return
+            cart['customer']['phone'] = phone
+            cart['step'] = 'waiting_customer_address'
+            await message.reply("📍 **آدرس** خود را وارد کنید:")
+            return
+        if cart['step'] == 'waiting_customer_address':
+            cart['customer']['address'] = text
+            cart['step'] = 'waiting_customer_shipping'
+            await message.reply("🚚 **باربری** مورد نظر را وارد کنید:")
+            return
+        if cart['step'] == 'waiting_customer_shipping':
+            cart['customer']['shipping'] = text
+            cart['step'] = 'idle'
+            await finalize_order(message, user_id, bot)
+            return
+        if chat_id == ADMIN_CHAT_ID:
+            print(f"🔍 پیام از حسابدار با reply_to_message_id: {message.reply_to_message_id}")
+            if message.reply_to_message_id:
+                found_user = None
+                found_info = None
+                for uid, info in last_invoice_for_admin.items():
+                    if info['message_id'] == message.reply_to_message_id:
+                        found_user = uid
+                        found_info = info
+                        break
+                if found_user and found_info:
+                    amount = extract_amount(text)
+                    if amount:
+                        current_debt = customer_debts.get(found_user, 0)
+                        new_debt = max(0, current_debt - amount)
+                        customer_debts[found_user] = new_debt
+                        await message.reply(
+                            f"✅ **تسویه حساب انجام شد!**\n\n"
+                            f"👤 کاربر: {found_info['user_name']}\n"
+                            f"💰 مبلغ واریز: {format_price(amount)} تومان\n"
+                            f"💳 بدهی جدید: {format_price(new_debt)} تومان"
+                        )
+                        try:
+                            await bot.send_message(
+                                chat_id=found_user,
+                                text=f"✅ **تسویه حساب شما تایید شد!**\n"
+                                     f"💰 مبلغ واریز: {format_price(amount)} تومان\n"
+                                     f"💳 بدهی جدید: {format_price(new_debt)} تومان"
+                            )
+                        except Exception as e:
+                            print(f"⚠️ خطا در ارسال پیام به کاربر: {e}")
+                        account_number = ""
+                        account_holder = ""
+                        result, msg = به‌روزرسانی_واریزی_در_شیت(found_info.get('invoice_number', ''), amount, account_number, account_holder)
+                        if result:
+                            await message.reply(msg)
+                        else:
+                            await message.reply(f"⚠️ {msg}")
+                        return
+                    else:
+                        await message.reply("❌ مبلغ در پیامک تراکنش پیدا نشد! لطفاً عدد را وارد کنید.")
+                        return
+                else:
+                    await message.reply("❌ فاکتور مورد نظر پیدا نشد! لطفاً روی فاکتور صحیح ریپلای کنید.")
+                    return
+            else:
+                await message.reply("📋 برای تایید تراکنش، روی فاکتور مورد نظر ریپلای بزنید و مبلغ را وارد کنید.")
+                return
+        else:
+            amount = extract_amount(text)
+            if amount and user_id in last_invoice_for_admin:
+                invoice_info = last_invoice_for_admin[user_id]
+                try:
+                    await bot.send_message(
+                        chat_id=ADMIN_CHAT_ID,
+                        text=f"📱 **پیامک تراکنش از مشتری:**\n"
+                             f"👤 کاربر: {invoice_info['user_name']}\n"
+                             f"💰 مبلغ: {format_price(amount)} تومان\n"
+                             f"📝 شماره تراکنش: {text[:100]}",
+                        reply_to_message_id=invoice_info['message_id']
+                    )
+                    await message.reply("✅ پیامک تراکنش شما به حسابدار ارسال شد. پس از تایید، بدهی شما به‌روزرسانی می‌شود.")
+                    print(f"✅ پیامک تراکنش به فاکتور حسابدار ریپلای شد برای کاربر {user_id}")
+                except Exception as e:
+                    print(f"⚠️ خطا در ارسال ریپلای: {e}")
+                    await message.reply("⚠️ خطا در ارسال پیامک به حسابدار. لطفاً دوباره تلاش کنید.")
+                return
+            else:
+                await message.reply(
+                    "📋 **منوی اصلی:**\n"
+                    "از دکمه‌های زیر استفاده کنید.\n"
+                    "برای جستجو، روی 🔍 جستجو کلیک کنید."
+                )
+                return
 
 @bot.on_callback()
 async def handle_callback(bot: Robot, message: Message):
-    # (بدون تغییر، از کد قبلی استفاده کنید)
-    pass
+    chat_id = message.chat_id
+    user_id = message.author_guid
+    data = message.data
+    cart = get_cart(user_id)
+    if data == 'search':
+        cart['search_query'] = ''
+        await show_search_keypad(message, user_id, bot)
+        return
+    if data.startswith('search_letter_'):
+        letter = data.replace('search_letter_', '')
+        cart['search_query'] += letter
+        await show_search_keypad(message, user_id, bot)
+        return
+    if data == 'search_backspace':
+        cart['search_query'] = cart['search_query'][:-1]
+        await show_search_keypad(message, user_id, bot)
+        return
+    if data == 'search_clear':
+        cart['search_query'] = ''
+        await show_search_keypad(message, user_id, bot)
+        return
+    if data == 'search_exit':
+        cart['search_query'] = ''
+        menu_keypad = ChatKeypadBuilder() \
+            .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
+            .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
+            .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
+            .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
+            .build()
+        await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
+        return
+    if data == 'search_show_more':
+        query = cart.get('search_query', '')
+        filtered = [p for p in all_products if query.lower() in p['name'].lower()] if query else []
+        if filtered:
+            text = f"🔍 **نتایج جستجو برای `{query}`**\n\n"
+            for i, prod in enumerate(filtered, 1):
+                text += f"{i}. {prod['name']} - {format_price(prod['price'])} تومان\n"
+            text += "\nبرای سفارش، روی دکمه محصول کلیک کنید."
+            keypad_builder = ChatKeypadBuilder()
+            for prod in filtered[:20]:
+                keypad_builder.row(
+                    ChatKeypadBuilder().button(
+                        id=f"select_{prod['name']}",
+                        text=f"➕ {prod['name']}"
+                    )
+                )
+            keypad_builder.row(ChatKeypadBuilder().button(id="search_exit", text="🔙 بازگشت"))
+            keypad = keypad_builder.build()
+            await message.reply_keypad(text, keypad)
+        else:
+            await message.reply("❌ هیچ محصولی یافت نشد.")
+        return
+    if data == 'show_products':
+        await show_products_list(message, user_id)
+        return
+    if data.startswith('select_'):
+        product_name = data.replace('select_', '')
+        product = next((p for p in all_products if p['name'] == product_name), None)
+        if not product:
+            await message.reply("❌ محصول پیدا نشد!")
+            return
+        cart['selected_product'] = product
+        cart['step'] = 'waiting_quantity'
+        await message.reply(
+            f"📦 **{product['name']}**\n"
+            f"💰 قیمت هر جفت: {format_price(product['price'])} تومان\n"
+            f"📦 تعداد جفت: {product.get('pairCount', 'نامشخص')}\n\n"
+            f"🔢 **تعداد کارتن مورد نظر را وارد کنید:**"
+        )
+        return
+    if data == 'show_cart':
+        if len(cart['items']) == 0:
+            await message.reply("🛒 سبد خرید شما خالی است!")
+            return
+        text = "🛒 **سبد خرید شما:**\n\n"
+        total = 0
+        for i, item in enumerate(cart['items'], 1):
+            pair_count = item.get('pairCount', 1)
+            subtotal = item['price'] * pair_count * item['quantity']
+            total += subtotal
+            text += f"{i}. {item['name']}\n"
+            text += f"   تعداد کارتن: {item['quantity']}\n"
+            text += f"   تعداد جفت: {pair_count}\n"
+            text += f"   قیمت هر جفت: {format_price(item['price'])} تومان\n"
+            text += f"   مجموع: {format_price(subtotal)} تومان\n\n"
+        text += f"━━━━━━━━━━━━━━━━\n"
+        text += f"💰 **جمع کل: {format_price(total)} تومان**\n\n"
+        keypad_builder = ChatKeypadBuilder()
+        for i, item in enumerate(cart['items'], 1):
+            keypad_builder.row(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ حذف {item['name']}"))
+        keypad_builder.row(ChatKeypadBuilder().button(id="checkout", text="✅ نهایی‌سازی سفارش"))
+        keypad_builder.row(ChatKeypadBuilder().button(id="clear_cart", text="🗑️ خالی کردن سبد"))
+        keypad_builder.row(ChatKeypadBuilder().button(id="back_menu", text="🔙 بازگشت به منو"))
+        keypad = keypad_builder.build()
+        await message.reply_keypad(text, keypad)
+        return
+    if data.startswith('remove_'):
+        product_name = data.replace('remove_', '')
+        cart['items'] = [item for item in cart['items'] if item['name'] != product_name]
+        await message.reply(f"🗑️ **{product_name}** از سبد خرید حذف شد.")
+        if len(cart['items']) == 0:
+            await message.reply("🛒 سبد خرید شما خالی است.")
+            menu_keypad = ChatKeypadBuilder() \
+                .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
+                .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
+                .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
+                .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
+                .build()
+            await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
+        else:
+            await show_cart_internal(bot, message, user_id)
+        return
+    if data == 'clear_cart':
+        cart['items'] = []
+        await message.reply("🗑️ **سبد خرید شما خالی شد.**")
+        menu_keypad = ChatKeypadBuilder() \
+            .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
+            .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
+            .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
+            .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
+            .build()
+        await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
+        return
+    if data == 'checkout':
+        if len(cart['items']) == 0:
+            await message.reply("❌ سبد خرید خالی است!")
+            return
+        cart['step'] = 'waiting_customer_name'
+        await message.reply(
+            "✅ **مرحله نهایی‌سازی سفارش**\n\n"
+            "لطفاً اطلاعات زیر را وارد کنید:\n\n"
+            "1️⃣ **نام و نام خانوادگی:**"
+        )
+        return
+    if data == 'back_menu':
+        menu_keypad = ChatKeypadBuilder() \
+            .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
+            .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
+            .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
+            .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
+            .build()
+        await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
+        return
+    if data == 'help':
+        await message.reply(
+            "📋 **راهنمای فروشگاه:**\n\n"
+            "1️⃣ از منوی اصلی، **مشاهده محصولات** یا **جستجو** را انتخاب کنید.\n"
+            "2️⃣ در جستجو، حروف را انتخاب کنید تا محصولات فیلتر شوند.\n"
+            "3️⃣ روی محصول مورد نظر کلیک کنید و تعداد کارتن را وارد کنید.\n"
+            "4️⃣ **بدون برگشت به منو**، محصول بعدی را انتخاب کنید.\n"
+            "5️⃣ در انتها **سبد خرید** را باز کنید.\n"
+            "6️⃣ می‌توانید هر محصول را حذف کنید یا سبد را خالی کنید.\n"
+            "7️⃣ **نهایی‌سازی** را بزنید و مشخصات خود را وارد کنید.\n"
+            "8️⃣ فاکتور تصویری با کیفیت بالا نمایش داده می‌شود.\n"
+            "9️⃣ برای تسویه حساب، پیامک تراکنش را همراه با مبلغ به این حساب ارسال کنید."
+        )
+        return
+    await message.reply("❌ دکمه نامعتبر!")
+
+async def show_cart_internal(bot: Robot, message: Message, user_id: str):
+    cart = get_cart(user_id)
+    if len(cart['items']) == 0:
+        await message.reply("🛒 سبد خرید شما خالی است!")
+        return
+    text = "🛒 **سبد خرید شما:**\n\n"
+    total = 0
+    for i, item in enumerate(cart['items'], 1):
+        pair_count = item.get('pairCount', 1)
+        subtotal = item['price'] * pair_count * item['quantity']
+        total += subtotal
+        text += f"{i}. {item['name']}\n"
+        text += f"   تعداد کارتن: {item['quantity']}\n"
+        text += f"   تعداد جفت: {pair_count}\n"
+        text += f"   قیمت هر جفت: {format_price(item['price'])} تومان\n"
+        text += f"   مجموع: {format_price(subtotal)} تومان\n\n"
+    text += f"━━━━━━━━━━━━━━━━\n"
+    text += f"💰 **جمع کل: {format_price(total)} تومان**\n\n"
+    keypad_builder = ChatKeypadBuilder()
+    for i, item in enumerate(cart['items'], 1):
+        keypad_builder.row(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ حذف {item['name']}"))
+    keypad_builder.row(ChatKeypadBuilder().button(id="checkout", text="✅ نهایی‌سازی سفارش"))
+    keypad_builder.row(ChatKeypadBuilder().button(id="clear_cart", text="🗑️ خالی کردن سبد"))
+    keypad_builder.row(ChatKeypadBuilder().button(id="back_menu", text="🔙 بازگشت به منو"))
+    keypad = keypad_builder.build()
+    await message.reply_keypad(text, keypad)
 
 # ============================================================
 # 🌐 Flask برای Keep-Alive
