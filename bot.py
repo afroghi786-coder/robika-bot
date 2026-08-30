@@ -158,38 +158,74 @@ customer_counter = data.get("customer_counter", 3000)
 customer_codes = data.get("customer_codes", {})
 
 # ============================================================
+# 🔗 توابع ارتباط با وب‌هوک گوگل‌شیت (منطق جدید)
+# ============================================================
+
+def call_webhook(action, payload={}):
+    payload["action"] = action
+    try:
+        response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("status") == "success":
+                return result
+        return None
+    except Exception as e:
+        logging.error(f"❌ خطا در ارتباط با وب‌هوک: {e}")
+        return None
+
+# ============================================================
 # 📦 توابع تولید شماره فاکتور و کد مشتری
 # ============================================================
 
 def generate_invoice_number():
     global invoice_counter, data
-    invoice_counter += 1
-    data["invoice_counter"] = invoice_counter
-    save_data(data)
-    now = datetime.now()
-    return f"M_{now.strftime('%Y%m%d')}{invoice_counter:04d}"
+    # دریافت شماره فاکتور از گوگل‌شیت
+    result = call_webhook("get_next_invoice")
+    if result and result.get("invoice_number"):
+        invoice_counter += 1
+        data["invoice_counter"] = invoice_counter
+        save_data(data)
+        return result["invoice_number"]
+    else:
+        # Fallback در صورت قطع بودن شیت
+        invoice_counter += 1
+        data["invoice_counter"] = invoice_counter
+        save_data(data)
+        now = datetime.now()
+        return f"M_{now.strftime('%Y%m%d')}{invoice_counter:04d}"
 
 def get_or_create_customer_code(phone):
     global customer_counter, customer_codes, data
     phone = phone.replace(' ', '').replace('-', '')
-    if phone in customer_codes:
-        return customer_codes[phone]
-    phone_to_code, max_code = get_existing_customer_data()
-    if phone in phone_to_code:
-        code = phone_to_code[phone]
+    # دریافت یا ایجاد کد مشتری از گوگل‌شیت
+    result = call_webhook("get_or_create_customer", {"phone": phone})
+    if result and result.get("customer_code"):
+        code = result["customer_code"]
         customer_codes[phone] = code
         data["customer_codes"] = customer_codes
         save_data(data)
         return code
-    if max_code > customer_counter:
-        customer_counter = max_code
-    customer_counter += 1
-    code = f"MO_{customer_counter}"
-    customer_codes[phone] = code
-    data["customer_counter"] = customer_counter
-    data["customer_codes"] = customer_codes
-    save_data(data)
-    return code
+    else:
+        # Fallback در صورت قطع بودن شیت
+        if phone in customer_codes:
+            return customer_codes[phone]
+        phone_to_code, max_code = get_existing_customer_data()
+        if phone in phone_to_code:
+            code = phone_to_code[phone]
+            customer_codes[phone] = code
+            data["customer_codes"] = customer_codes
+            save_data(data)
+            return code
+        if max_code > customer_counter:
+            customer_counter = max_code
+        customer_counter += 1
+        code = f"MO_{customer_counter}"
+        customer_codes[phone] = code
+        data["customer_counter"] = customer_counter
+        data["customer_codes"] = customer_codes
+        save_data(data)
+        return code
 
 # ============================================================
 # 📦 ذخیره‌سازی محصولات
