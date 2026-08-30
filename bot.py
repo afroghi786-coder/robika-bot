@@ -253,7 +253,7 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbx_mI3dx5qslEpqE_IZDeOnnBVdqHvzzgFF7vy0bf0YP2oiji_qbzn6QxeHnZfyAKVN8A/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxTeCSdRRB4YXI5I1F9Q-tUh25lI4ZKax0zMvCixMhPm3TDWbJ2iVlbWeUXlXITCbqkhg/exec"
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     try:
@@ -294,13 +294,10 @@ def به‌روزرسانی_واریزی_در_شیت(invoice_number, payment_amo
             result = response.json()
             if result.get("status") == "success":
                 print(f"✅ واریزی {invoice_number} ثبت شد.")
-                
-                # اگر پیام برگشتی از شیت ناقص بود، خودمان پیام کامل را می‌سازیم
                 msg = result.get("message", "")
                 if "تومان" not in msg or "فاکتور" not in msg:
                     formatted_amount = f"{payment_amount:,}".replace(",", "٬")
                     msg = f"واریزی {formatted_amount} تومان برای فاکتور {invoice_number} ثبت شد."
-                
                 return True, msg
         return False, f"❌ خطا: {response.text}"
     except Exception as e:
@@ -343,6 +340,19 @@ def convert_persian_number(text):
     for p, e in mapping.items():
         text = text.replace(p, e)
     return text
+
+# ⬇️ تابع جدید برای اصلاح شماره تماس (همیشه با صفر و به صورت رشته)
+def normalize_phone(phone):
+    phone = str(phone).replace(' ', '').replace('-', '')
+    if phone.startswith('+98'):
+        phone = '0' + phone[3:]
+    elif phone.startswith('0098'):
+        phone = '0' + phone[4:]
+    elif phone.startswith('98') and len(phone) == 12:
+        phone = '0' + phone[2:]
+    elif phone.startswith('9') and len(phone) == 10:
+        phone = '0' + phone
+    return phone
 
 def detect_product(text):
     if not text:
@@ -648,7 +658,11 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     if len(cart['items']) == 0:
         await message.reply("❌ سبد خرید خالی است!")
         return
-    phone = customer.get('phone', '')
+    
+    # ⬇️ اصلاح شماره تماس با صفر در خود پایتون
+    phone = normalize_phone(customer.get('phone', ''))
+    customer['phone'] = phone
+    
     if len(phone.replace(' ', '').replace('-', '')) < 11:
         await message.reply("❌ شماره تماس معتبر نیست. حداقل ۱۱ رقم وارد کنید.")
         return
@@ -657,12 +671,14 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     items_list = []
     for item in cart['items']:
         pair_count = item.get('pairCount', 1)
+        # ⬇️ ضرب تعداد کارتن در تعداد جفت برای ستون جفت
+        total_pairs = item.get('quantity', 0) * pair_count
         subtotal = item['price'] * pair_count * item['quantity']
         total += subtotal
         items_list.append({
             'name': item['name'],
             'quantity': item['quantity'],
-            'pairCount': pair_count,
+            'pairCount': total_pairs,  # ⬅️ مقدار کل جفت جایگزین می‌شود
             'price_per_pair': item['price'],
             'subtotal': subtotal
         })
