@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با Webhook گوگل‌شیت + Keep-Alive
+# 🤖 ربات فروشگاهی - نسخه نهایی با ذخیره‌سازی دائمی و مدیریت کامل مشتری
 # ============================================================
 
 from rubka import Robot, Message
@@ -14,12 +14,133 @@ import json
 import threading
 from flask import Flask, request, jsonify
 import requests
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 # ============================================================
-# 📦 ذخیره‌سازی دائمی محصولات
+# 📦 ذخیره‌سازی دائمی محصولات و داده‌های پایدار
 # ============================================================
 
 PRODUCTS_FILE = "products.json"
+DATA_FILE = "data.json"
+CREDENTIALS_FILE = "credentials.json"  # ← فایل credentials.json را در پروژه قرار دهید
+SHEET_ID = "شناسه_شیت_خود_را_اینجا_وارد_کنید"  # ← شناسه فایل گوگل‌شیت
+
+def load_data():
+    default_data = {
+        "invoice_counter": 0,
+        "customer_counter": 3000,
+        "customer_codes": {}
+    }
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return default_data
+    return default_data
+
+def save_data(data):
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# بارگذاری داده‌ها در شروع
+data = load_data()
+invoice_counter = data.get("invoice_counter", 0)
+customer_counter = data.get("customer_counter", 3000)
+customer_codes = data.get("customer_codes", {})
+
+# ============================================================
+# 📊 اتصال به گوگل‌شیت برای خواندن کد مشتری
+# ============================================================
+
+def get_google_sheet():
+    """اتصال به گوگل‌شیت و باز کردن شیت «فروش»"""
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
+    client = gspread.authorize(creds)
+    return client.open_by_key(SHEET_ID).worksheet("فروش")
+
+def get_existing_customer_data():
+    """خواندن شماره تماس و کد مشتری از شیت فروش"""
+    try:
+        sheet = get_google_sheet()
+        records = sheet.get_all_values()
+        if len(records) < 2:
+            return {}, 3000
+        
+        # پیدا کردن ایندکس ستون‌ها
+        header = records[0]
+        try:
+            col_phone = header.index("تلفن_مشتری") + 1
+            col_code = header.index("کد_مشتری") + 1
+        except ValueError:
+            # اگر هدرها دقیقاً مطابقت نداشت، از نام‌های جایگزین استفاده کن
+            col_phone = None
+            col_code = None
+            for i, h in enumerate(header):
+                if "تلفن" in h or "شماره تماس" in h:
+                    col_phone = i + 1
+                if "کد_مشتری" in h or "کد مشتری" in h:
+                    col_code = i + 1
+            if not col_phone or not col_code:
+                return {}, 3000
+        
+        phone_to_code = {}
+        max_code = 3000
+        for row in records[1:]:
+            if len(row) >= max(col_phone, col_code):
+                phone = str(row[col_phone-1]).strip().replace(' ', '').replace('-', '')
+                code = str(row[col_code-1]).strip()
+                if phone and code:
+                    phone_to_code[phone] = code
+                    # استخراج عدد از کد (MO_XXXX)
+                    if code.startswith("MO_"):
+                        try:
+                            num = int(code.replace("MO_", ""))
+                            if num > max_code:
+                                max_code = num
+                        except:
+                            pass
+        return phone_to_code, max_code
+    except Exception as e:
+        print(f"⚠️ خطا در خواندن شیت فروش: {e}")
+        return {}, 3000
+
+def get_or_create_customer_code(phone):
+    """دریافت کد مشتری بر اساس شماره تماس (از شیت فروش)"""
+    global customer_counter, customer_codes, data
+    
+    phone = phone.replace(' ', '').replace('-', '')
+    
+    # ابتدا از دیکشنری محلی چک کن
+    if phone in customer_codes:
+        return customer_codes[phone]
+    
+    # از شیت فروش بخوان
+    phone_to_code, max_code = get_existing_customer_data()
+    if phone in phone_to_code:
+        code = phone_to_code[phone]
+        customer_codes[phone] = code
+        data["customer_codes"] = customer_codes
+        save_data(data)
+        return code
+    
+    # شماره جدید است → کد جدید بساز
+    # از max_code استفاده کن (بزرگترین کد موجود در شیت)
+    if max_code > customer_counter:
+        customer_counter = max_code
+    customer_counter += 1
+    code = f"MO_{customer_counter}"
+    customer_codes[phone] = code
+    data["customer_counter"] = customer_counter
+    data["customer_codes"] = customer_codes
+    save_data(data)
+    return code
+
+# ============================================================
+# 📦 ذخیره‌سازی محصولات
+# ============================================================
 
 def load_products():
     if os.path.exists(PRODUCTS_FILE):
@@ -37,14 +158,13 @@ def save_products(products):
 
 TOKEN = os.environ.get("TOKEN", "")
 BOT_USERNAME = "FroghiShopBot"
-ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"  # ← شناسه چت حسابدار را اینجا قرار دهید
+ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"  # ← شناسه چت حسابدار
 
 # ============================================================
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-# 🔴 این آدرس را با آدرس Webhook خود جایگزین کنید
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzAyeOQsvd_rL3wppS_8rAO2p9siU7S_PuG8T2msQ7za1RUAn5VjE1abxC25mmmzACuEw/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycb.../exec"  # ← آدرس Webhook خود را قرار دهید
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     """ارسال سفارش به Webhook - هر محصول یک ردیف"""
@@ -103,15 +223,12 @@ def به‌روزرسانی_واریزی_در_شیت(invoice_number, payment_amo
         return False, f"❌ خطا: {e}"
 
 # ============================================================
-# 📦 حافظه (سبد خرید، بدهی‌ها و ...)
+# 📦 حافظه موقت (سبد خرید، بدهی‌ها و ...)
 # ============================================================
 
 all_products = load_products()
 carts = {}
 customer_debts = {}
-customer_codes = {}
-invoice_counter = 0
-customer_counter = 3000
 last_invoice_for_admin = {}
 
 PERSIAN_LETTERS = [
@@ -186,20 +303,12 @@ def format_price(num):
     return f"{num:,}".replace(',', '٬')
 
 def generate_invoice_number():
-    global invoice_counter
+    global invoice_counter, data
     invoice_counter += 1
+    data["invoice_counter"] = invoice_counter
+    save_data(data)
     now = datetime.now()
     return f"M_{now.strftime('%Y%m%d')}{invoice_counter:04d}"
-
-def get_or_create_customer_code(phone):
-    global customer_counter
-    phone = phone.replace(' ', '').replace('-', '')
-    if phone in customer_codes:
-        return customer_codes[phone]
-    customer_counter += 1
-    code = f"MO_{customer_counter}"
-    customer_codes[phone] = code
-    return code
 
 def add_to_cart(user_id, product, quantity):
     cart = get_cart(user_id)
@@ -243,11 +352,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         height += 100
     image = Image.new('RGB', (width, height), color=(255, 255, 255))
     draw = ImageDraw.Draw(image)
-    draw.rectangle(
-        [(margin, margin), (width - margin, height - margin)],
-        outline=(25, 70, 160),
-        width=6
-    )
+    draw.rectangle([(margin, margin), (width - margin, height - margin)], outline=(25, 70, 160), width=6)
     font_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -292,12 +397,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     draw.text((right_x - 750, y), persian_text(f"شماره: {invoice_number}"), fill=(0, 0, 0), font=font_header)
     draw.text((right_x - 650, y + 100), persian_text(f"کد مشتری: {customer_code}"), fill=(25, 70, 160), font=font_header)
     y += 260
-    draw.rectangle(
-        [(margin + 20, y), (width - margin - 20, y + 200)],
-        fill=(245, 248, 250),
-        outline=(200, 210, 220),
-        width=2
-    )
+    draw.rectangle([(margin + 20, y), (width - margin - 20, y + 200)], fill=(245, 248, 250), outline=(200, 210, 220), width=2)
     draw.text((right_x - 450, y + 40), persian_text(f"مشتری: {customer.get('name', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
     draw.text((right_x - 520, y + 105), persian_text(f"تلفن: {customer.get('phone', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
     draw.text((right_x - 520, y + 170), persian_text(f"آدرس: {customer.get('address', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
@@ -309,10 +409,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     for w in col_widths:
         col_pos.append(current - w)
         current -= w
-    draw.rectangle(
-        [(margin + 20, y), (width - margin - 20, y + 100)],
-        fill=(25, 70, 160)
-    )
+    draw.rectangle([(margin + 20, y), (width - margin - 20, y + 100)], fill=(25, 70, 160))
     draw.text((col_pos[0] + 20, y + 30), persian_text("ردیف"), fill=(255, 255, 255), font=font_bold)
     draw.text((col_pos[1] + 20, y + 30), persian_text("نام مدل"), fill=(255, 255, 255), font=font_bold)
     draw.text((col_pos[2] + 20, y + 30), persian_text("کارتن"), fill=(255, 255, 255), font=font_bold)
@@ -322,10 +419,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     y += 100
     for i, item in enumerate(items, 1):
         if i % 2 == 0:
-            draw.rectangle(
-                [(margin + 20, y), (width - margin - 20, y + 110)],
-                fill=(248, 250, 252)
-            )
+            draw.rectangle([(margin + 20, y), (width - margin - 20, y + 110)], fill=(248, 250, 252))
         draw.text((col_pos[0] + 20, y + 35), str(i), fill=(0, 0, 0), font=font_normal)
         draw.text((col_pos[1] + 20, y + 35), persian_text(item['name'][:50]), fill=(0, 0, 0), font=font_normal)
         draw.text((col_pos[2] + 20, y + 35), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
@@ -333,11 +427,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
         draw.text((col_pos[4] + 20, y + 35), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
         draw.text((col_pos[5] + 20, y + 35), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
         y += 110
-    draw.line(
-        [(margin + 20, y), (width - margin - 20, y)],
-        fill=(200, 210, 220),
-        width=4
-    )
+    draw.line([(margin + 20, y), (width - margin - 20, y)], fill=(200, 210, 220), width=4)
     y += 80
     draw.text((right_x - 700, y), persian_text(f"جمع سفارش جدید: {format_price(total)} تومان"), fill=(25, 70, 160), font=font_bold)
     y += 110
@@ -486,7 +576,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     if len(phone.replace(' ', '').replace('-', '')) < 11:
         await message.reply("❌ شماره تماس معتبر نیست. حداقل ۱۱ رقم وارد کنید.")
         return
-    customer_code = get_or_create_customer_code(phone)
+    customer_code = get_or_create_customer_code(phone)  # ← مدیریت کد مشتری از شیت
     total = 0
     items_list = []
     for item in cart['items']:
@@ -502,7 +592,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
         })
     previous_debt = customer_debts.get(user_id, 0)
     total_payable = previous_debt + total
-    invoice_number = generate_invoice_number()
+    invoice_number = generate_invoice_number()  # ← شمارنده دائمی
     try:
         image_path = create_invoice_image(
             customer=customer,
@@ -570,14 +660,10 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     )
 
 # ============================================================
-# 🤖 ساخت ربات
+# 🤖 ساخت ربات و هندلرها
 # ============================================================
 
 bot = Robot(token=TOKEN)
-
-# ============================================================
-# 📩 وقتی پیام میاد
-# ============================================================
 
 @bot.on_message()
 async def handle_message(bot: Robot, message: Message):
@@ -699,7 +785,6 @@ async def handle_message(bot: Robot, message: Message):
                             )
                         except Exception as e:
                             print(f"⚠️ خطا در ارسال پیام به کاربر: {e}")
-                        # ✅ ثبت واریزی در گوگل‌شیت (شماره حساب و نام صاحب حساب از پیام استخراج می‌شود)
                         account_number = ""  # در صورت وجود از پیام استخراج کنید
                         account_holder = ""   # در صورت وجود از پیام استخراج کنید
                         result, msg = به‌روزرسانی_واریزی_در_شیت(found_info.get('invoice_number', ''), amount, account_number, account_holder)
@@ -743,10 +828,6 @@ async def handle_message(bot: Robot, message: Message):
                     "برای جستجو، روی 🔍 جستجو کلیک کنید."
                 )
                 return
-
-# ============================================================
-# 🎯 پردازش کلیک دکمه‌ها
-# ============================================================
 
 @bot.on_callback()
 async def handle_callback(bot: Robot, message: Message):
@@ -909,10 +990,6 @@ async def handle_callback(bot: Robot, message: Message):
         )
         return
     await message.reply("❌ دکمه نامعتبر!")
-
-# ============================================================
-# 🔧 تابع کمکی برای نمایش سبد خرید (بدون تکرار)
-# ============================================================
 
 async def show_cart_internal(bot: Robot, message: Message, user_id: str):
     cart = get_cart(user_id)
