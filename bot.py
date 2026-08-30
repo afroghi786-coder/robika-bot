@@ -253,7 +253,7 @@ ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxy8amuAlimbNgyr6PWquPdla03XazwfZhQNvPVZbfzHMbZsGwbdqrpCv4qH10Vk64BZQ/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbx_mI3dx5qslEpqE_IZDeOnnBVdqHvzzgFF7vy0bf0YP2oiji_qbzn6QxeHnZfyAKVN8A/exec"
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     try:
