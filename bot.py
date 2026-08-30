@@ -294,7 +294,14 @@ def به‌روزرسانی_واریزی_در_شیت(invoice_number, payment_amo
             result = response.json()
             if result.get("status") == "success":
                 print(f"✅ واریزی {invoice_number} ثبت شد.")
-                return True, result.get("message", "")
+                
+                # اگر پیام برگشتی از شیت ناقص بود، خودمان پیام کامل را می‌سازیم
+                msg = result.get("message", "")
+                if "تومان" not in msg or "فاکتور" not in msg:
+                    formatted_amount = f"{payment_amount:,}".replace(",", "٬")
+                    msg = f"واریزی {formatted_amount} تومان برای فاکتور {invoice_number} ثبت شد."
+                
+                return True, msg
         return False, f"❌ خطا: {response.text}"
     except Exception as e:
         return False, f"❌ خطا: {e}"
