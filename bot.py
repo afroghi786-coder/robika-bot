@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با حل سه مشکل اصلی
+# 🤖 ربات فروشگاهی - نسخه نهایی با حل کامل مشکلات
 # ============================================================
 
 from rubka import Robot, Message
@@ -23,11 +23,11 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 PRODUCTS_FILE = "products.json"
 DATA_FILE = "data.json"
-CREDENTIALS_FILE = "credentials.json"
-SHEET_ID = "شناسه_شیت_خود_را_اینجا_وارد_کنید"
+CREDENTIALS_FILE = "credentials.json"   # ← فایل credentials.json را در پروژه قرار دهید
+SHEET_ID = "شناسه_شیت_خود_را_اینجا_وارد_کنید"  # ← شناسه فایل گوگل‌شیت
 
 # ============================================================
-# 📊 اتصال به گوگل‌شیت (با عنوان‌های دقیق)
+# 📊 اتصال به گوگل‌شیت (با خواندن عنوان ستون‌ها)
 # ============================================================
 
 def get_google_sheet():
@@ -36,9 +36,16 @@ def get_google_sheet():
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID).worksheet("فروش")
 
-# ============================================================
-# 🔍 توابع کمکی برای خواندن از شیت
-# ============================================================
+def get_column_index_by_title(records, title_keywords):
+    """پیدا کردن ایندکس ستون بر اساس عنوان (انعطاف‌پذیر)"""
+    if len(records) == 0:
+        return None
+    header = records[0]
+    for i, cell in enumerate(header):
+        for keyword in title_keywords:
+            if keyword in str(cell).strip():
+                return i
+    return None
 
 def get_last_invoice_number_from_sheet():
     """بزرگترین شماره فاکتور موجود در شیت را برمی‌گرداند"""
@@ -47,8 +54,11 @@ def get_last_invoice_number_from_sheet():
         records = sheet.get_all_values()
         if len(records) < 2:
             return 0
-        # ستون C = شماره_فاکتور (ایندکس 2)
-        col_invoice = 2
+        
+        col_invoice = get_column_index_by_title(records, ["شماره_فاکتور", "شماره فاکتور"])
+        if col_invoice is None:
+            return 0
+        
         max_num = 0
         for row in records[1:]:
             if len(row) > col_invoice:
@@ -66,16 +76,19 @@ def get_last_invoice_number_from_sheet():
         return 0
 
 def get_existing_customer_data():
-    """خواندن شماره تماس و کد مشتری از شیت (ستون‌های F و D)"""
+    """خواندن شماره تماس و کد مشتری از شیت"""
     try:
         sheet = get_google_sheet()
         records = sheet.get_all_values()
         if len(records) < 2:
             return {}, 3000
-        # ستون F = تلفن_مشتری (ایندکس 5)
-        # ستون D = کد_مشتری (ایندکس 3)
-        col_phone = 5
-        col_code = 3
+        
+        col_phone = get_column_index_by_title(records, ["تلفن_مشتری", "تلفن مشتری", "شماره تماس"])
+        col_code = get_column_index_by_title(records, ["کد_مشتری", "کد مشتری"])
+        
+        if col_phone is None or col_code is None:
+            return {}, 3000
+        
         phone_to_code = {}
         max_code = 3000
         for row in records[1:]:
@@ -125,9 +138,7 @@ def save_data(data):
 # بارگذاری داده‌ها در شروع
 data = load_data()
 
-# ============================================================
-# ✅ حل مشکل شماره فاکتور تکراری
-# ============================================================
+# ✅ هماهنگ‌سازی شمارنده فاکتور با شیت فروش
 last_invoice = get_last_invoice_number_from_sheet()
 if last_invoice > data.get("invoice_counter", 0):
     data["invoice_counter"] = last_invoice
@@ -150,15 +161,12 @@ def generate_invoice_number():
     return f"M_{now.strftime('%Y%m%d')}{invoice_counter:04d}"
 
 def get_or_create_customer_code(phone):
-    """✅ حل مشکل کد مشتری تکراری"""
     global customer_counter, customer_codes, data
     phone = phone.replace(' ', '').replace('-', '')
     
-    # ۱. ابتدا از دیکشنری محلی چک کن
     if phone in customer_codes:
         return customer_codes[phone]
     
-    # ۲. از شیت فروش بخوان
     phone_to_code, max_code = get_existing_customer_data()
     if phone in phone_to_code:
         code = phone_to_code[phone]
@@ -167,8 +175,6 @@ def get_or_create_customer_code(phone):
         save_data(data)
         return code
     
-    # ۳. شماره جدید است → کد جدید بساز
-    # از max_code استفاده کن (بزرگترین کد موجود در شیت)
     if max_code > customer_counter:
         customer_counter = max_code
     customer_counter += 1
@@ -199,13 +205,13 @@ def save_products(products):
 
 TOKEN = os.environ.get("TOKEN", "")
 BOT_USERNAME = "FroghiShopBot"
-ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
+ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"  # ← شناسه چت حسابدار را تنظیم کنید
 
 # ============================================================
 # 📊 تنظیمات گوگل‌شیت (Webhook)
 # ============================================================
 
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzt-UOFiszWdIWveMWoPf0Zx1edavLTsOLjAehq5Xk1Opu4uuxe_R3Y6Ps0tCOqDCPUzQ/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycb.../exec"  # ← آدرس Webhook خود را قرار دهید
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
     try:
@@ -221,13 +227,20 @@ def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, custom
             "total": total,
             "items": items
         }
+        print(f"📤 ارسال به Webhook: {WEBHOOK_URL}")
+        print(f"📦 Payload: {json.dumps(payload, ensure_ascii=False)}")
         response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
         if response.status_code == 200:
             result = response.json()
             if result.get("status") == "success":
                 print(f"✅ سفارش {invoice_number} در گوگل‌شیت ثبت شد.")
                 return True
-        return False
+            else:
+                print(f"⚠️ خطا از سمت Webhook: {result.get('message')}")
+                return False
+        else:
+            print(f"⚠️ خطا در ارتباط با Webhook: {response.text}")
+            return False
     except Exception as e:
         print(f"❌ خطا در ثبت سفارش: {e}")
         return False
@@ -351,7 +364,7 @@ def add_to_cart(user_id, product, quantity):
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور (بدون تغییر)
+# 🖼️ تولید فاکتور
 # ============================================================
 
 def persian_text(text):
@@ -586,7 +599,7 @@ async def show_search_keypad(message: Message, user_id: str, bot: Robot):
         )
 
 # ============================================================
-# 💾 نهایی‌سازی سفارش (با مدیریت کد مشتری و شماره فاکتور)
+# 💾 نهایی‌سازی سفارش
 # ============================================================
 
 async def finalize_order(message: Message, user_id: str, bot: Robot):
@@ -600,7 +613,6 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     if len(phone.replace(' ', '').replace('-', '')) < 11:
         await message.reply("❌ شماره تماس معتبر نیست. حداقل ۱۱ رقم وارد کنید.")
         return
-    # ✅ دریافت کد مشتری (با حل مشکل تکراری)
     customer_code = get_or_create_customer_code(phone)
     total = 0
     items_list = []
@@ -617,7 +629,6 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
         })
     previous_debt = customer_debts.get(user_id, 0)
     total_payable = previous_debt + total
-    # ✅ تولید شماره فاکتور (با حل مشکل تکراری)
     invoice_number = generate_invoice_number()
     try:
         image_path = create_invoice_image(
@@ -686,7 +697,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     )
 
 # ============================================================
-# 🤖 ساخت ربات و هندلرها (کامل)
+# 🤖 ساخت ربات و هندلرها
 # ============================================================
 
 bot = Robot(token=TOKEN)
