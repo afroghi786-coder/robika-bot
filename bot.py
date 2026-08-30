@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی کامل (با دسته‌بندی خودکار)
+# 🤖 ربات فروشگاهی - نسخه نهایی کامل (با لینک کانال + دسته‌بندی)
 # ============================================================
 
 from rubka import Robot, Message
@@ -246,7 +246,7 @@ for p in all_products:
 TOKEN = os.environ.get("TOKEN", "")
 BOT_USERNAME = "FroghiShopBot"
 ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyGuEHRJJSKVyp_0RrXc7S5BXK_C2O2e1opukP1fwnK8sYN9gETa9ASJvDDjZkrf0cVqg/exec"
+WEBHOOK_URL = "pt.google.com/macros/s/AKfycbyGuEHRJJSKVyp_0RrXc7S5BXK_C2O2e1opukP1fwnK8sYN9gETa9ASJvDDjZkrf0cVqg/exec"
 
 # ============================================================
 # 🔍 توابع کمکی
@@ -271,7 +271,6 @@ def normalize_phone(phone):
         phone = '0' + phone
     return phone
 
-# 🆕 تابع تشخیص دسته‌بندی خودکار
 def detect_category(text):
     text = text.lower()
     if "مردانه" in text or "آقایان" in text:
@@ -309,7 +308,6 @@ def detect_product(text):
     price = max(all_numbers)
     if not name or price == 0:
         return None
-    # 🆕 تشخیص دسته از متن محصول
     category = detect_category(text)
     return {'name': name, 'price': price, 'pairCount': pair_count, 'category': category}
 
@@ -377,7 +375,6 @@ async def show_main_menu(message, user_id):
     await message.reply_keypad("🏠 **منوی اصلی فروشگاه:**", keypad_builder.build())
 
 async def show_categories_menu(message, user_id, bot):
-    """نمایش منوی دسته‌بندی‌ها"""
     keypad_builder = ChatKeypadBuilder()
     keypad_builder.row(
         ChatKeypadBuilder().button(id="cat_همه محصولات", text="🗂️ همه محصولات"),
@@ -395,11 +392,9 @@ async def show_categories_menu(message, user_id, bot):
         ChatKeypadBuilder().button(id="cat_متفرقه", text="📦 متفرقه"),
     )
     keypad_builder.row(ChatKeypadBuilder().button(id="back_to_menu", text="🔙 بازگشت به منو"))
-    
     await message.reply_keypad("🗂️ **انتخاب دسته‌بندی:**", keypad_builder.build())
 
 async def show_products_page(message, user_id, bot):
-    """نمایش لیست محصولات بر اساس دسته انتخاب شده"""
     cart = get_cart(user_id)
     category = cart['current_category']
     page = cart['current_page']
@@ -463,6 +458,33 @@ async def show_cart_internal(bot, message, user_id):
     keypad_builder.row(ChatKeypadBuilder().button(id="back_to_menu", text="🔙 بازگشت به منو"))
     text = f"🛒 **سبد خرید شما:**\n💰 **جمع کل: {format_price(total)} تومان**"
     await message.reply_keypad(text, keypad_builder.build())
+
+# ============================================================
+# 📤 ارسال لینک به کانال (برگردانده شد به حالت قبل)
+# ============================================================
+
+async def send_link_to_channel(chat_id, product):
+    bot_link = f"https://rubika.ir/{BOT_USERNAME}"
+    button_text = "➕ سفارش این مدل"
+    text = (
+        f"📦 **{product['name']}**\n"
+        f"💰 قیمت هر جفت: {format_price(product['price'])} تومان\n"
+        f"📦 تعداد جفت: {product.get('pairCount', 'نامشخص')}\n\n"
+        f"{button_text}"
+    )
+    start_index = text.index(button_text)
+    await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        meta_data={
+            'meta_data_parts': [{
+                'type': 'Link',
+                'from_index': start_index,
+                'length': len(button_text),
+                'link_url': bot_link
+            }]
+        }
+    )
 
 # ============================================================
 # 🖼️ تولید فاکتور
@@ -693,7 +715,7 @@ async def handle_message(bot: Robot, message: Message):
     user_id = message.author_guid
     text = message.text if message.text else ''
     
-      if chat_id.startswith('c0'):
+    if chat_id.startswith('c0'):
         product = detect_product(text)
         if not product:
             return
@@ -709,9 +731,10 @@ async def handle_message(bot: Robot, message: Message):
         if not found:
             all_products.append(product)
             save_products(all_products)
-        # ✅ تغییر اصلی: برگرداندن لینک به جای پیام دسته
+        # ✅ تغییر مهم: ارسال لینک کانال به جای پیام دسته
         await send_link_to_channel(chat_id, product)
         return
+
     if chat_id.startswith('b0'):
         cart = get_cart(user_id)
         if text == '/start' or text == 'start':
