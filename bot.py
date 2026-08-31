@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی (جستجوی متنی + دسته زنانه)
+# 🤖 ربات فروشگاهی - نسخه نهایی (بازگشت جزئیات سبد خرید)
 # ============================================================
 
 from rubka import Robot, Message
@@ -246,7 +246,7 @@ for p in all_products:
 TOKEN = os.environ.get("TOKEN", "")
 BOT_USERNAME = "FroghiShopBot"
 ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxTtc3sLfFTaxdoyTDeCIFA4AB7pXGiV-EwR4gI-arsqw6AXsfi28Ndbdx0g8VwuAKt7Q/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxTeCSdRRB4YXI5I1F9Q-tUh25lI4ZKax0zMvCixMhPm3TDWbJ2iVlbWeUXlXITCbqkhg/exec"
 
 # ============================================================
 # 🔍 توابع کمکی
@@ -438,7 +438,6 @@ async def show_products_page(message, user_id, bot):
     await message.reply_keypad(text, keypad_builder.build())
 
 async def show_search_results(message, user_id, bot):
-    """نمایش نتایج جستجوی متنی"""
     cart = get_cart(user_id)
     query = cart.get('search_query', '')
     if not query:
@@ -471,29 +470,47 @@ async def show_search_results(message, user_id, bot):
     text = f"🔍 **نتایج جستجو برای `{query}`** ({len(filtered)} محصول)"
     await message.reply_keypad(text, keypad_builder.build())
 
+# ⬇️ بخش اصلاح شده: نمایش جزئیات کامل سبد خرید
 async def show_cart_internal(bot, message, user_id):
     cart = get_cart(user_id)
     if len(cart['items']) == 0:
         await message.reply("🛒 سبد خرید شما خالی است!")
         return
+    
     total = 0
+    text = "🛒 **سبد خرید شما:**\n\n"
+    
     keypad_builder = ChatKeypadBuilder()
     row = []
-    for item in cart['items']:
+    
+    # نمایش جزئیات هر آیتم
+    for i, item in enumerate(cart['items'], 1):
         pair_count = item.get('pairCount', 1)
         subtotal = item['price'] * pair_count * item['quantity']
         total += subtotal
+        
+        text += f"{i}. **{item['name']}**\n"
+        text += f"   تعداد کارتن: {item['quantity']}\n"
+        text += f"   تعداد جفت: {pair_count}\n"
+        text += f"   قیمت هر جفت: {format_price(item['price'])} تومان\n"
+        text += f"   **مجموع: {format_price(subtotal)} تومان**\n\n"
+        
         short_name = item['name'][:20]
-        row.append(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ {short_name}"))
+        row.append(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ حذف {short_name}"))
         if len(row) == 2:
             keypad_builder.row(*row)
             row = []
+    
     if row:
         keypad_builder.row(*row)
+
+    text += f"━━━━━━━━━━━━━━━━\n"
+    text += f"💰 **جمع کل: {format_price(total)} تومان**"
+
     keypad_builder.row(ChatKeypadBuilder().button(id="checkout", text="✅ نهایی‌سازی سفارش"))
     keypad_builder.row(ChatKeypadBuilder().button(id="clear_cart", text="🗑️ خالی کردن سبد"))
     keypad_builder.row(ChatKeypadBuilder().button(id="back_to_menu", text="🔙 بازگشت به منو"))
-    text = f"🛒 **سبد خرید شما:**\n💰 **جمع کل: {format_price(total)} تومان**"
+    
     await message.reply_keypad(text, keypad_builder.build())
 
 # ============================================================
@@ -777,7 +794,6 @@ async def handle_message(bot: Robot, message: Message):
             await show_main_menu(message, user_id)
             return
         
-        # ✅ بخش جدید جستجوی متنی
         if cart['step'] == 'searching':
             query = text.strip()
             if not query:
@@ -807,7 +823,6 @@ async def handle_message(bot: Robot, message: Message):
             if success:
                 cart['step'] = 'idle'
                 cart['selected_product'] = None
-                # اگر از جستجو آمده بود، دوباره نتایج جستجو را نشان بده
                 if cart.get('search_query'):
                     await show_search_results(message, user_id, bot)
                 else:
@@ -917,14 +932,12 @@ async def handle_callback(bot: Robot, message: Message):
         await show_main_menu(message, user_id)
         return
     
-    # ✅ شروع جستجوی متنی
     if data == 'search':
         cart['search_query'] = ''
         cart['step'] = 'searching'
         await message.reply("🔍 **جستجوی محصولات**\n\nلطفاً نام محصول مورد نظر خود را تایپ کنید (مثلاً: پوما، کفش، ساناز...):")
         return
 
-    # ✅ جستجوی جدید
     if data == 'new_search':
         cart['search_query'] = ''
         cart['step'] = 'searching'
