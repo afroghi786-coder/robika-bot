@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی (بازگشت جزئیات سبد خرید)
+# 🤖 ربات فروشگاهی - نسخه نهایی کامل (با خواندن بدهی از گوگل شیت)
 # ============================================================
 
 from rubka import Robot, Message
@@ -14,8 +14,6 @@ import json
 import threading
 from flask import Flask, request, jsonify
 import requests
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -26,89 +24,9 @@ logging.basicConfig(level=logging.INFO)
 
 PRODUCTS_FILE = "products.json"
 DATA_FILE = "data.json"
-CREDENTIALS_FILE = "credentials.json"
-SHEET_ID = "شناسه_شیت_خود_را_اینجا_وارد_کنید"
 
 # ============================================================
-# 📊 اتصال به گوگل‌شیت
-# ============================================================
-
-def get_google_sheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(SHEET_ID).worksheet("فروش")
-
-def get_column_index_by_title(records, title_variants):
-    if len(records) == 0:
-        return None
-    header = records[0]
-    for i, cell in enumerate(header):
-        cell_clean = str(cell).strip()
-        for variant in title_variants:
-            if cell_clean == variant or cell_clean.startswith(variant) or cell_clean.endswith(variant) or variant in cell_clean:
-                logging.info(f"✅ ستون '{variant}' پیدا شد: ایندکس {i}")
-                return i
-    logging.warning(f"⚠️ هیچ یک از عنوان‌های {title_variants} در هدر پیدا نشد!")
-    return None
-
-def get_last_invoice_number_from_sheet():
-    try:
-        sheet = get_google_sheet()
-        records = sheet.get_all_values()
-        if len(records) < 2:
-            return 0
-        col_invoice = get_column_index_by_title(records, ["شماره_فاکتور", "شماره فاکتور"])
-        if col_invoice is None:
-            return 0
-        max_num = 0
-        for row in records[1:]:
-            if len(row) > col_invoice:
-                val = row[col_invoice].strip()
-                if val.startswith("M_"):
-                    try:
-                        num = int(val.split("_")[1])
-                        if num > max_num:
-                            max_num = num
-                    except:
-                        pass
-        return max_num
-    except Exception as e:
-        logging.error(f"❌ خطا در خواندن شماره فاکتور: {e}")
-        return 0
-
-def get_existing_customer_data():
-    try:
-        sheet = get_google_sheet()
-        records = sheet.get_all_values()
-        if len(records) < 2:
-            return {}, 3000
-        col_phone = get_column_index_by_title(records, ["تلفن_مشتری", "تلفن مشتری", "شماره تماس"])
-        col_code = get_column_index_by_title(records, ["کد_مشتری", "کد مشتری"])
-        if col_phone is None or col_code is None:
-            return {}, 3000
-        phone_to_code = {}
-        max_code = 3000
-        for row in records[1:]:
-            if len(row) > max(col_phone, col_code):
-                phone = str(row[col_phone]).strip().replace(' ', '').replace('-', '')
-                code = str(row[col_code]).strip()
-                if phone and code:
-                    phone_to_code[phone] = code
-                    if code.startswith("MO_"):
-                        try:
-                            num = int(code.replace("MO_", ""))
-                            if num > max_code:
-                                max_code = num
-                        except:
-                            pass
-        return phone_to_code, max_code
-    except Exception as e:
-        logging.error(f"❌ خطا در خواندن کد مشتری: {e}")
-        return {}, 3000
-
-# ============================================================
-# 📦 مدیریت داده‌های پایدار
+# 📦 مدیریت داده‌های پایدار (بدهی‌ها، فاکتورها و شمارنده‌ها)
 # ============================================================
 
 def load_data():
@@ -138,16 +56,6 @@ def save_data(data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 data = load_data()
-last_invoice = get_last_invoice_number_from_sheet()
-if last_invoice > data.get("invoice_counter", 0):
-    data["invoice_counter"] = last_invoice
-    save_data(data)
-
-phone_to_code, max_code = get_existing_customer_data()
-if max_code > data.get("customer_counter", 3000):
-    data["customer_counter"] = max_code
-    save_data(data)
-
 invoice_counter = data.get("invoice_counter", 0)
 customer_counter = data.get("customer_counter", 3000)
 customer_codes = data.get("customer_codes", {})
@@ -172,7 +80,7 @@ def call_webhook(action, payload={}):
         return None
 
 # ============================================================
-# 📦 توابع تولید شماره فاکتور و کد مشتری
+# 📦 توابع تولید شماره فاکتور و کد مشتری (فقط از وب‌هوک)
 # ============================================================
 
 def generate_invoice_number():
@@ -203,15 +111,6 @@ def get_or_create_customer_code(phone):
     else:
         if phone in customer_codes:
             return customer_codes[phone]
-        phone_to_code, max_code = get_existing_customer_data()
-        if phone in phone_to_code:
-            code = phone_to_code[phone]
-            customer_codes[phone] = code
-            data["customer_codes"] = customer_codes
-            save_data(data)
-            return code
-        if max_code > customer_counter:
-            customer_counter = max_code
         customer_counter += 1
         code = f"MO_{customer_counter}"
         customer_codes[phone] = code
@@ -219,6 +118,16 @@ def get_or_create_customer_code(phone):
         data["customer_codes"] = customer_codes
         save_data(data)
         return code
+
+# ============================================================
+# 🆕 تابع دریافت بدهی از گوگل شیت بر اساس کد مشتری
+# ============================================================
+
+def get_customer_debt_from_sheet(customer_code):
+    result = call_webhook("get_customer_debt", {"customer_code": customer_code})
+    if result and "debt" in result:
+        return int(result["debt"])
+    return None
 
 # ============================================================
 # 📦 ذخیره‌سازی محصولات
@@ -246,10 +155,10 @@ for p in all_products:
 TOKEN = os.environ.get("TOKEN", "")
 BOT_USERNAME = "FroghiShopBot"
 ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxP1CPsL6FEWxSM_guS8nnbDnbpDkP7YSzMgCNPcAd5M7Ce04UsHl52cX_ItUEb-KBX5g/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxTeCSdRRB4YXI5I1F9Q-tUh25lI4ZKax0zMvCixMhPm3TDWbJ2iVlbWeUXlXITCbqkhg/exec"
 
 # ============================================================
-# 🔍 توابع کمکی
+# 🔍 توابع کمکی (بدون تغییر)
 # ============================================================
 
 def convert_persian_number(text):
@@ -470,7 +379,6 @@ async def show_search_results(message, user_id, bot):
     text = f"🔍 **نتایج جستجو برای `{query}`** ({len(filtered)} محصول)"
     await message.reply_keypad(text, keypad_builder.build())
 
-# ⬇️ بخش اصلاح شده: نمایش جزئیات کامل سبد خرید
 async def show_cart_internal(bot, message, user_id):
     cart = get_cart(user_id)
     if len(cart['items']) == 0:
@@ -479,22 +387,18 @@ async def show_cart_internal(bot, message, user_id):
     
     total = 0
     text = "🛒 **سبد خرید شما:**\n\n"
-    
     keypad_builder = ChatKeypadBuilder()
     row = []
     
-    # نمایش جزئیات هر آیتم
     for i, item in enumerate(cart['items'], 1):
         pair_count = item.get('pairCount', 1)
         subtotal = item['price'] * pair_count * item['quantity']
         total += subtotal
-        
         text += f"{i}. **{item['name']}**\n"
         text += f"   تعداد کارتن: {item['quantity']}\n"
         text += f"   تعداد جفت: {pair_count}\n"
         text += f"   قیمت هر جفت: {format_price(item['price'])} تومان\n"
         text += f"   **مجموع: {format_price(subtotal)} تومان**\n\n"
-        
         short_name = item['name'][:20]
         row.append(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ حذف {short_name}"))
         if len(row) == 2:
@@ -503,14 +407,11 @@ async def show_cart_internal(bot, message, user_id):
     
     if row:
         keypad_builder.row(*row)
-
     text += f"━━━━━━━━━━━━━━━━\n"
     text += f"💰 **جمع کل: {format_price(total)} تومان**"
-
     keypad_builder.row(ChatKeypadBuilder().button(id="checkout", text="✅ نهایی‌سازی سفارش"))
     keypad_builder.row(ChatKeypadBuilder().button(id="clear_cart", text="🗑️ خالی کردن سبد"))
     keypad_builder.row(ChatKeypadBuilder().button(id="back_to_menu", text="🔙 بازگشت به منو"))
-    
     await message.reply_keypad(text, keypad_builder.build())
 
 # ============================================================
@@ -642,7 +543,7 @@ def create_invoice_image(customer, items, total, previous_debt, invoice_number, 
     return filename
 
 # ============================================================
-# 💾 نهایی‌سازی سفارش
+# 💾 نهایی‌سازی سفارش (بدهی از شیت خوانده می‌شود)
 # ============================================================
 
 def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
@@ -699,6 +600,17 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
         await message.reply("❌ شماره تماس معتبر نیست. حداقل ۱۱ رقم وارد کنید.")
         return
     customer_code = get_or_create_customer_code(phone)
+    
+    # ⬇️ دریافت بدهی از گوگل شیت بر اساس کد مشتری
+    sheet_debt = get_customer_debt_from_sheet(customer_code)
+    if sheet_debt is not None:
+        previous_debt = sheet_debt
+        customer_debts[user_id] = previous_debt
+        data["customer_debts"] = customer_debts
+        save_data(data)
+    else:
+        previous_debt = customer_debts.get(user_id, 0)
+
     total = 0
     items_list = []
     for item in cart['items']:
@@ -711,9 +623,10 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
             'pairCount': total_pairs, 'price_per_pair': item['price'],
             'subtotal': subtotal
         })
-    previous_debt = customer_debts.get(user_id, 0)
+        
     total_payable = previous_debt + total
     invoice_number = generate_invoice_number()
+    
     try:
         image_path = create_invoice_image(customer, items_list, total, previous_debt, invoice_number, customer_code)
         await bot.send_photo(chat_id=message.chat_id, photo=image_path, caption=f"🧾 فاکتور شماره: {invoice_number}\n🆔 کد مشتری: {customer_code}")
@@ -723,24 +636,30 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
         print(f"⚠️ خطا در تولید فاکتور: {e}")
         await message.reply("⚠️ خطا در تولید فاکتور، لطفاً دوباره تلاش کنید.")
         return
+        
     try:
         image_path = create_invoice_image(customer, items_list, total, previous_debt, invoice_number, customer_code)
         admin_msg = await bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=image_path, caption=f"📬 فاکتور جدید از مشتری: {customer.get('name', 'نامشخص')}\n🆔 کد مشتری: {customer_code}\n💳 بدهی فعلی: {format_price(total_payable)} تومان")
         if os.path.exists(image_path):
             os.remove(image_path)
         last_invoice_for_admin[user_id] = {
-            'message_id': admin_msg.message_id, 'chat_id': ADMIN_CHAT_ID,
+            'message_id': admin_msg.message_id, 
+            'chat_id': ADMIN_CHAT_ID,
             'user_name': customer.get('name', 'نامشخص'),
-            'total_payable': total_payable, 'invoice_number': invoice_number
+            'total_payable': total_payable, 
+            'invoice_number': invoice_number,
+            'customer_code': customer_code
         }
         data["last_invoice_for_admin"] = last_invoice_for_admin
         save_data(data)
     except Exception as e:
         print(f"⚠️ خطا در ارسال فاکتور به حسابدار: {e}")
+        
     ثبت_سفارش_در_شیت(customer, items_list, total, invoice_number, customer_code)
     customer_debts[user_id] = total_payable
     data["customer_debts"] = customer_debts
     save_data(data)
+    
     cart['items'] = []
     cart['customer'] = {}
     cart['step'] = 'idle'
@@ -758,7 +677,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     )
 
 # ============================================================
-# 🤖 هندلر پیام‌ها
+# 🤖 هندلر پیام‌ها (بدهی از شیت خوانده می‌شود)
 # ============================================================
 
 bot = Robot(token=TOKEN)
@@ -864,15 +783,24 @@ async def handle_message(bot: Robot, message: Message):
                 if found_user and found_info:
                     amount = extract_amount(text)
                     if amount:
-                        current_debt = customer_debts.get(found_user, 0)
+                        # ⬇️ دریافت بدهی از گوگل شیت بر اساس کد مشتری ذخیره شده
+                        customer_code = found_info.get('customer_code')
+                        sheet_debt = get_customer_debt_from_sheet(customer_code) if customer_code else None
+                        if sheet_debt is not None:
+                            current_debt = sheet_debt
+                        else:
+                            current_debt = customer_debts.get(found_user, 0)
+                            
                         new_debt = current_debt - amount
                         customer_debts[found_user] = new_debt
                         data["customer_debts"] = customer_debts
                         save_data(data)
+                        
                         if new_debt < 0:
                             debt_status = f"بستانکاری: {format_price(abs(new_debt))} تومان"
                         else:
                             debt_status = f"بدهی: {format_price(new_debt)} تومان"
+                            
                         await message.reply(
                             f"✅ **تسویه حساب انجام شد!**\n👤 کاربر: {found_info['user_name']}\n💰 مبلغ واریز: {format_price(amount)} تومان\n💳 وضعیت حساب: {debt_status}"
                         )
