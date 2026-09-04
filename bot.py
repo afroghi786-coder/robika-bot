@@ -155,7 +155,7 @@ for p in all_products:
 TOKEN = os.environ.get("TOKEN", "")
 BOT_USERNAME = "FroghiShopBot"
 ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycby5BULzyCfvF3CtW4qM6qBJuSchMZVVB6LfJEY1dvr8moFFXJVuRivE-j6tEOVqr9D-Cw/exec"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycby8J4Zi9s0GKM_-B8E8HKYDPwR9pEQAfOsk36FuL7cqY5vtATV8hMuepgvujwW8NgGTtQ/exec"
 
 # ============================================================
 # 🔍 توابع کمکی (بدون تغییر)
