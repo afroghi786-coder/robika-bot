@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی - نسخه نهایی با واریزی کامل
+# 🤖 ربات فروشگاهی - نسخه نهایی کامل با ثبت نام بانک و صاحب حساب
 # ============================================================
 
 from rubka import Robot, Message
@@ -14,11 +14,8 @@ import json
 import threading
 from flask import Flask, request, jsonify
 import requests
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import logging
 
-# تنظیم لاگ برای عیب‌یابی
 logging.basicConfig(level=logging.INFO)
 
 # ============================================================
@@ -27,102 +24,18 @@ logging.basicConfig(level=logging.INFO)
 
 PRODUCTS_FILE = "products.json"
 DATA_FILE = "data.json"
-CREDENTIALS_FILE = "credentials.json"
-SHEET_ID = "شناسه_شیت_خود_را_اینجا_وارد_کنید"
 
 # ============================================================
-# 📊 اتصال به گوگل‌شیت (با خواندن عنوان ستون‌ها)
-# ============================================================
-
-def get_google_sheet():
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, scope)
-    client = gspread.authorize(creds)
-    return client.open_by_key(SHEET_ID).worksheet("فروش")
-
-def get_column_index_by_title(records, title_variants):
-    if len(records) == 0:
-        return None
-    header = records[0]
-    for i, cell in enumerate(header):
-        cell_clean = str(cell).strip()
-        for variant in title_variants:
-            if cell_clean == variant or cell_clean.startswith(variant) or cell_clean.endswith(variant) or variant in cell_clean:
-                logging.info(f"✅ ستون '{variant}' پیدا شد: ایندکس {i}")
-                return i
-    logging.warning(f"⚠️ هیچ یک از عنوان‌های {title_variants} در هدر پیدا نشد!")
-    return None
-
-def get_last_invoice_number_from_sheet():
-    try:
-        sheet = get_google_sheet()
-        records = sheet.get_all_values()
-        if len(records) < 2:
-            return 0
-        col_invoice = get_column_index_by_title(records, [
-            "شماره_فاکتور", "شماره فاکتور", "شماره_فاکتور_خرید", "شماره فاکتور خرید"
-        ])
-        if col_invoice is None:
-            return 0
-        max_num = 0
-        for row in records[1:]:
-            if len(row) > col_invoice:
-                val = row[col_invoice].strip()
-                if val.startswith("M_"):
-                    try:
-                        num = int(val.split("_")[1])
-                        if num > max_num:
-                            max_num = num
-                    except:
-                        pass
-        return max_num
-    except Exception as e:
-        logging.error(f"❌ خطا در خواندن شماره فاکتور: {e}")
-        return 0
-
-def get_existing_customer_data():
-    try:
-        sheet = get_google_sheet()
-        records = sheet.get_all_values()
-        if len(records) < 2:
-            return {}, 3000
-        col_phone = get_column_index_by_title(records, [
-            "تلفن_مشتری", "تلفن مشتری", "شماره تماس", "شماره_تماس"
-        ])
-        col_code = get_column_index_by_title(records, [
-            "کد_مشتری", "کد مشتری", "کد مشتری"
-        ])
-        if col_phone is None or col_code is None:
-            return {}, 3000
-        phone_to_code = {}
-        max_code = 3000
-        for row in records[1:]:
-            if len(row) > max(col_phone, col_code):
-                phone = str(row[col_phone]).strip().replace(' ', '').replace('-', '')
-                code = str(row[col_code]).strip()
-                if phone and code:
-                    phone_to_code[phone] = code
-                    if code.startswith("MO_"):
-                        try:
-                            num = int(code.replace("MO_", ""))
-                            if num > max_code:
-                                max_code = num
-                        except:
-                            pass
-        return phone_to_code, max_code
-    except Exception as e:
-        logging.error(f"❌ خطا در خواندن کد مشتری: {e}")
-        return {}, 3000
-
-# ============================================================
-# 📦 مدیریت داده‌های پایدار (شمارنده‌ها)
+# 📦 مدیریت داده‌های پایدار (بدهی‌ها، فاکتورها و شمارنده‌ها)
 # ============================================================
 
 def load_data():
     default_data = {
         "invoice_counter": 0,
         "customer_counter": 3000,
-        "customer_codes": {}
+        "customer_codes": {},
+        "customer_debts": {},
+        "last_invoice_for_admin": {}
     }
     if os.path.exists(DATA_FILE):
         try:
@@ -131,6 +44,8 @@ def load_data():
                 data.setdefault("invoice_counter", 0)
                 data.setdefault("customer_counter", 3000)
                 data.setdefault("customer_codes", {})
+                data.setdefault("customer_debts", {})
+                data.setdefault("last_invoice_for_admin", {})
                 return data
         except:
             return default_data
@@ -140,56 +55,79 @@ def save_data(data):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# بارگذاری داده‌ها در شروع
 data = load_data()
-
-last_invoice = get_last_invoice_number_from_sheet()
-if last_invoice > data.get("invoice_counter", 0):
-    data["invoice_counter"] = last_invoice
-    save_data(data)
-
-phone_to_code, max_code = get_existing_customer_data()
-if max_code > data.get("customer_counter", 3000):
-    data["customer_counter"] = max_code
-    save_data(data)
-
 invoice_counter = data.get("invoice_counter", 0)
 customer_counter = data.get("customer_counter", 3000)
 customer_codes = data.get("customer_codes", {})
+customer_debts = data.get("customer_debts", {})
+last_invoice_for_admin = data.get("last_invoice_for_admin", {})
 
 # ============================================================
-# 📦 توابع تولید شماره فاکتور و کد مشتری
+# 🔗 توابع ارتباط با وب‌هوک گوگل‌شیت
+# ============================================================
+
+def call_webhook(action, payload={}):
+    payload["action"] = action
+    try:
+        response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("status") == "success":
+                return result
+        return None
+    except Exception as e:
+        logging.error(f"❌ خطا در ارتباط با وب‌هوک: {e}")
+        return None
+
+# ============================================================
+# 📦 توابع تولید شماره فاکتور و کد مشتری (فقط از وب‌هوک)
 # ============================================================
 
 def generate_invoice_number():
     global invoice_counter, data
-    invoice_counter += 1
-    data["invoice_counter"] = invoice_counter
-    save_data(data)
-    now = datetime.now()
-    return f"M_{now.strftime('%Y%m%d')}{invoice_counter:04d}"
+    result = call_webhook("get_next_invoice")
+    if result and result.get("invoice_number"):
+        invoice_counter += 1
+        data["invoice_counter"] = invoice_counter
+        save_data(data)
+        return result["invoice_number"]
+    else:
+        invoice_counter += 1
+        data["invoice_counter"] = invoice_counter
+        save_data(data)
+        now = datetime.now()
+        return f"M_{now.strftime('%Y%m%d')}{invoice_counter:04d}"
 
 def get_or_create_customer_code(phone):
     global customer_counter, customer_codes, data
     phone = phone.replace(' ', '').replace('-', '')
-    if phone in customer_codes:
-        return customer_codes[phone]
-    phone_to_code, max_code = get_existing_customer_data()
-    if phone in phone_to_code:
-        code = phone_to_code[phone]
+    result = call_webhook("get_or_create_customer", {"phone": phone})
+    if result and result.get("customer_code"):
+        code = result["customer_code"]
         customer_codes[phone] = code
         data["customer_codes"] = customer_codes
         save_data(data)
         return code
-    if max_code > customer_counter:
-        customer_counter = max_code
-    customer_counter += 1
-    code = f"MO_{customer_counter}"
-    customer_codes[phone] = code
-    data["customer_counter"] = customer_counter
-    data["customer_codes"] = customer_codes
-    save_data(data)
-    return code
+    else:
+        if phone in customer_codes:
+            return customer_codes[phone]
+        customer_counter += 1
+        code = f"MO_{customer_counter}"
+        customer_codes[phone] = code
+        data["customer_counter"] = customer_counter
+        data["customer_codes"] = customer_codes
+        save_data(data)
+        return code
+
+# ============================================================
+# 🆕 تابع دریافت بدهی از گوگل شیت بر اساس کد مشتری
+# ============================================================
+
+def get_customer_debt_from_sheet(customer_code):
+    result = call_webhook("get_customer_debt", {"customer_code": customer_code})
+    if result and "debt" in result:
+        return int(result["debt"])
+    return None
 
 # ============================================================
 # 📦 ذخیره‌سازی محصولات
@@ -205,6 +143,11 @@ def save_products(products):
     with open(PRODUCTS_FILE, 'w', encoding='utf-8') as f:
         json.dump(products, f, ensure_ascii=False, indent=2)
 
+all_products = load_products()
+for p in all_products:
+    if "category" not in p:
+        p["category"] = "متفرقه"
+
 # ============================================================
 # 🤖 تنظیمات اولیه
 # ============================================================
@@ -212,126 +155,10 @@ def save_products(products):
 TOKEN = os.environ.get("TOKEN", "")
 BOT_USERNAME = "FroghiShopBot"
 ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
+WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyLmBj_QDfAYkIJx7w5jgD-ds0BTp39Jf5LIh3cuzSRd47j3czLCrBv6aj3-1WI8mrNSQ/exec"
 
 # ============================================================
-# 📊 تنظیمات گوگل‌شیت (Webhook)
-# ============================================================
-
-WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzsCidOnfzJPMkGX3Ah2SUs-bXp9sFjmPWUVCplsldXWDLkAWZpGB0R5pe_C8AEQ8M1HQ/exec"
-
-def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
-    try:
-        payload = {
-            "action": "register",
-            "timestamp": datetime.now().isoformat(),
-            "invoice_number": invoice_number,
-            "customer_code": customer_code,
-            "customer_name": customer.get('name', ''),
-            "customer_phone": customer.get('phone', ''),
-            "customer_address": customer.get('address', ''),
-            "customer_shipping": customer.get('shipping', ''),
-            "total": total,
-            "items": items
-        }
-        response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("status") == "success":
-                print(f"✅ سفارش {invoice_number} در گوگل‌شیت ثبت شد.")
-                return True
-        return False
-    except Exception as e:
-        print(f"❌ خطا در ثبت سفارش: {e}")
-        return False
-
-def به‌روزرسانی_واریزی_در_شیت(invoice_number, payment_amount, account_number="", account_holder=""):
-    try:
-        payload = {
-            "action": "update_payment",
-            "invoice_number": invoice_number,
-            "payment_amount": payment_amount,
-            "account_number": account_number,
-            "account_holder": account_holder
-        }
-        response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
-        if response.status_code == 200:
-            result = response.json()
-            if result.get("status") == "success":
-                print(f"✅ واریزی {invoice_number} ثبت شد.")
-                return True, result.get("message", "")
-        return False, f"❌ خطا: {response.text}"
-    except Exception as e:
-        return False, f"❌ خطا: {e}"
-
-# ============================================================
-# 🔍 تابع جدید: تجزیه پیام حسابدار (فقط همین بخش اضافه شده)
-# ============================================================
-
-def parse_admin_payment(text):
-    """استخراج مبلغ، نام بانک و نام صاحب حساب از پیام حسابدار"""
-    # ۱. استخراج مبلغ (آخرین عدد)
-    amount = extract_amount(text)
-    if amount is None:
-        return None, None, None
-
-    # ۲. حذف مبلغ از متن (برای گرفتن باقیمانده)
-    numbers = re.findall(r'[\d۰-۹]+', text)
-    if not numbers:
-        return None, None, None
-    last_number = numbers[-1]
-    pos = text.rfind(last_number)
-    if pos != -1:
-        rest = text[:pos].strip()
-    else:
-        rest = text
-
-    # ۳. حذف کلمات اضافی مانند "به" یا "واریز به"
-    rest = re.sub(r'^(به\s*|واریز\s*به\s*)', '', rest).strip()
-
-    # ۴. تشخیص نام بانک و صاحب حساب
-    bank = ''
-    holder = ''
-    if rest:
-        words = rest.split()
-        if len(words) >= 2:
-            bank = words[0]
-            holder = ' '.join(words[1:])
-        else:
-            holder = rest
-    else:
-        holder = rest
-
-    return amount, bank, holder
-
-# ============================================================
-# 📦 حافظه موقت (سبد خرید، بدهی‌ها و ...)
-# ============================================================
-
-all_products = load_products()
-carts = {}
-customer_debts = {}
-last_invoice_for_admin = {}
-
-PERSIAN_LETTERS = [
-    'ا', 'ب', 'پ', 'ت', 'ث', 'ج', 'چ', 'ح', 'خ', 'د', 'ذ', 'ر', 'ز', 'ژ',
-    'س', 'ش', 'ص', 'ض', 'ط', 'ظ', 'ع', 'غ', 'ف', 'ق', 'ک', 'گ', 'ل', 'م',
-    'ن', 'و', 'ه', 'ی'
-]
-NUMBERS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-
-def get_cart(user_id):
-    if user_id not in carts:
-        carts[user_id] = {
-            'items': [],
-            'step': 'idle',
-            'selected_product': None,
-            'customer': {},
-            'search_query': ''
-        }
-    return carts[user_id]
-
-# ============================================================
-# 🔍 توابع کمکی
+# 🔍 توابع کمکی (بدون تغییر)
 # ============================================================
 
 def convert_persian_number(text):
@@ -341,9 +168,36 @@ def convert_persian_number(text):
         text = text.replace(p, e)
     return text
 
+def normalize_phone(phone):
+    phone = str(phone).replace(' ', '').replace('-', '')
+    if phone.startswith('+98'):
+        phone = '0' + phone[3:]
+    elif phone.startswith('0098'):
+        phone = '0' + phone[4:]
+    elif phone.startswith('98') and len(phone) == 12:
+        phone = '0' + phone[2:]
+    elif phone.startswith('9') and len(phone) == 10:
+        phone = '0' + phone
+    return phone
+
+def detect_category(text):
+    text = text.lower()
+    if "مردانه" in text or "آقایان" in text:
+        return "مردانه"
+    elif "زنانه" in text or "بانوان" in text:
+        return "زنانه"
+    elif "میانه" in text:
+        return "میانه"
+    elif "بچگانه" in text or "بچه" in text or "کودک" in text:
+        return "بچگانه"
+    elif "دخترانه" in text or "دختر" in text:
+        return "دخترانه"
+    elif "پسرانه" in text or "پسر" in text:
+        return "پسرانه"
+    else:
+        return "متفرقه"
+
 def detect_product(text):
-    if not text:
-        return None
     lines = [line.strip() for line in text.split('\n') if line.strip()]
     if not lines:
         return None
@@ -365,11 +219,10 @@ def detect_product(text):
     price = max(all_numbers)
     if not name or price == 0:
         return None
-    return {'name': name, 'price': price, 'pairCount': pair_count}
+    category = detect_category(text)
+    return {'name': name, 'price': price, 'pairCount': pair_count, 'category': category}
 
 def extract_amount(text):
-    if not text:
-        return None
     text_clean = re.sub(r'[٬,/]', '', text)
     numbers = re.findall(r'(\d+)', text_clean)
     if numbers:
@@ -381,6 +234,8 @@ def extract_amount(text):
 def format_price(num):
     if not num:
         return "0"
+    if num < 0:
+        return f"-{abs(num):,}".replace(',', '٬')
     return f"{num:,}".replace(',', '٬')
 
 def add_to_cart(user_id, product, quantity):
@@ -392,130 +247,172 @@ def add_to_cart(user_id, product, quantity):
             item['quantity'] += quantity
             return True, f"✅ تعداد {product['name']} افزایش یافت!"
     cart['items'].append({
-        'name': product['name'],
-        'price': product['price'],
-        'quantity': quantity,
-        'pairCount': product.get('pairCount', 0)
+        'name': product['name'], 'price': product['price'],
+        'quantity': quantity, 'pairCount': product.get('pairCount', 0)
     })
     return True, f"✅ {product['name']} به سبد خرید اضافه شد!"
 
 # ============================================================
-# 🖼️ تولید فاکتور
+# 📦 حافظه موقت
 # ============================================================
 
-def persian_text(text):
-    if not text:
-        return ""
-    try:
-        reshaped = arabic_reshaper.reshape(text)
-        return get_display(reshaped)
-    except:
-        return text
+carts = {}
 
-def create_invoice_image(customer, items, total, previous_debt, invoice_number, customer_code):
-    margin = 80
-    width = 3200
-    row_height = 120
-    header_height = 280
-    customer_height = 200
-    table_header_height = 100
-    footer_height = 280
-    height = margin + header_height + customer_height + table_header_height + (len(items) * row_height) + 200 + footer_height + margin
-    if previous_debt > 0:
-        height += 100
-    image = Image.new('RGB', (width, height), color=(255, 255, 255))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle([(margin, margin), (width - margin, height - margin)], outline=(25, 70, 160), width=6)
-    font_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/tahoma.ttf"
-    ]
-    font_found = None
-    for path in font_paths:
-        if os.path.exists(path):
-            font_found = path
-            break
-    if font_found:
-        try:
-            font_title = ImageFont.truetype(font_found, 76)
-            font_header = ImageFont.truetype(font_found, 56)
-            font_normal = ImageFont.truetype(font_found, 46)
-            font_bold = ImageFont.truetype(font_found, 50)
-            font_footer = ImageFont.truetype(font_found, 60)
-        except:
-            font_title = ImageFont.load_default()
-            font_header = ImageFont.load_default()
-            font_normal = ImageFont.load_default()
-            font_bold = ImageFont.load_default()
-            font_footer = ImageFont.load_default()
-    else:
-        font_title = ImageFont.load_default()
-        font_header = ImageFont.load_default()
-        font_normal = ImageFont.load_default()
-        font_bold = ImageFont.load_default()
-        font_footer = ImageFont.load_default()
-    y = margin + 40
-    right_x = width - margin - 40
-    if os.path.exists("logo.png"):
-        try:
-            logo = Image.open("logo.png")
-            logo = logo.resize((240, 180))
-            image.paste(logo, (margin + 20, y - 20))
-        except:
-            pass
-    draw.text((right_x - 600, y), persian_text("فاکتور فروش"), fill=(25, 70, 160), font=font_title)
-    draw.text((right_x - 650, y + 100), persian_text(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}"), fill=(100, 100, 100), font=font_header)
-    draw.text((right_x - 750, y), persian_text(f"شماره: {invoice_number}"), fill=(0, 0, 0), font=font_header)
-    draw.text((right_x - 650, y + 100), persian_text(f"کد مشتری: {customer_code}"), fill=(25, 70, 160), font=font_header)
-    y += 260
-    draw.rectangle([(margin + 20, y), (width - margin - 20, y + 200)], fill=(245, 248, 250), outline=(200, 210, 220), width=2)
-    draw.text((right_x - 450, y + 40), persian_text(f"مشتری: {customer.get('name', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
-    draw.text((right_x - 520, y + 105), persian_text(f"تلفن: {customer.get('phone', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
-    draw.text((right_x - 520, y + 170), persian_text(f"آدرس: {customer.get('address', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
-    draw.text((600, y + 40), persian_text(f"باربری: {customer.get('shipping', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal)
-    y += 250
-    col_widths = [100, 1200, 180, 180, 450, 600]
-    col_pos = []
-    current = right_x
-    for w in col_widths:
-        col_pos.append(current - w)
-        current -= w
-    draw.rectangle([(margin + 20, y), (width - margin - 20, y + 100)], fill=(25, 70, 160))
-    draw.text((col_pos[0] + 20, y + 30), persian_text("ردیف"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col_pos[1] + 20, y + 30), persian_text("نام مدل"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col_pos[2] + 20, y + 30), persian_text("کارتن"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col_pos[3] + 20, y + 30), persian_text("جفت"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col_pos[4] + 20, y + 30), persian_text("قیمت هر جفت"), fill=(255, 255, 255), font=font_bold)
-    draw.text((col_pos[5] + 20, y + 30), persian_text("مبلغ کل"), fill=(255, 255, 255), font=font_bold)
-    y += 100
-    for i, item in enumerate(items, 1):
-        if i % 2 == 0:
-            draw.rectangle([(margin + 20, y), (width - margin - 20, y + 110)], fill=(248, 250, 252))
-        draw.text((col_pos[0] + 20, y + 35), str(i), fill=(0, 0, 0), font=font_normal)
-        draw.text((col_pos[1] + 20, y + 35), persian_text(item['name'][:50]), fill=(0, 0, 0), font=font_normal)
-        draw.text((col_pos[2] + 20, y + 35), str(item['quantity']), fill=(0, 0, 0), font=font_normal)
-        draw.text((col_pos[3] + 20, y + 35), str(item['pairCount']), fill=(0, 0, 0), font=font_normal)
-        draw.text((col_pos[4] + 20, y + 35), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal)
-        draw.text((col_pos[5] + 20, y + 35), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal)
-        y += 110
-    draw.line([(margin + 20, y), (width - margin - 20, y)], fill=(200, 210, 220), width=4)
-    y += 80
-    draw.text((right_x - 700, y), persian_text(f"جمع سفارش جدید: {format_price(total)} تومان"), fill=(25, 70, 160), font=font_bold)
-    y += 110
-    if previous_debt > 0:
-        draw.text((right_x - 700, y), persian_text(f"بدهی قبلی: {format_price(previous_debt)} تومان"), fill=(200, 50, 50), font=font_bold)
-        y += 110
-        draw.text((right_x - 750, y), persian_text(f"مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان"), fill=(0, 150, 0), font=font_bold)
-    else:
-        draw.text((right_x - 700, y), persian_text(f"مبلغ قابل پرداخت: {format_price(total)} تومان"), fill=(0, 150, 0), font=font_bold)
-    y += 200
-    draw.text((right_x - 500, y), persian_text("🙏 از اعتماد شما سپاسگزاریم!"), fill=(150, 150, 150), font=font_footer)
-    filename = f"invoices/invoice_{invoice_number}.png"
-    os.makedirs("invoices", exist_ok=True)
-    image.save(filename, "PNG", quality=100, dpi=(300, 300))
-    return filename
+def get_cart(user_id):
+    if user_id not in carts:
+        carts[user_id] = {
+            'items': [], 'step': 'idle', 'selected_product': None,
+            'customer': {}, 'search_query': '',
+            'current_page': 1, 'current_category': 'همه محصولات'
+        }
+    return carts[user_id]
+
+# ============================================================
+# 🎨 دکوریشن و نمایش
+# ============================================================
+
+async def show_main_menu(message, user_id):
+    keypad_builder = ChatKeypadBuilder()
+    keypad_builder.row(
+        ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات"),
+        ChatKeypadBuilder().button(id="search", text="🔍 جستجو"),
+    )
+    keypad_builder.row(
+        ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید"),
+        ChatKeypadBuilder().button(id="help", text="📋 راهنما"),
+    )
+    await message.reply_keypad("🏠 **منوی اصلی فروشگاه:**", keypad_builder.build())
+
+async def show_categories_menu(message, user_id, bot):
+    keypad_builder = ChatKeypadBuilder()
+    keypad_builder.row(
+        ChatKeypadBuilder().button(id="cat_همه محصولات", text="🗂️ همه محصولات"),
+    )
+    keypad_builder.row(
+        ChatKeypadBuilder().button(id="cat_مردانه", text="👞 مردانه"),
+        ChatKeypadBuilder().button(id="cat_زنانه", text="👠 زنانه"),
+    )
+    keypad_builder.row(
+        ChatKeypadBuilder().button(id="cat_میانه", text="👟 میانه"),
+        ChatKeypadBuilder().button(id="cat_بچگانه", text="🧒 بچگانه"),
+    )
+    keypad_builder.row(
+        ChatKeypadBuilder().button(id="cat_دخترانه", text="👧 دخترانه"),
+        ChatKeypadBuilder().button(id="cat_پسرانه", text="👦 پسرانه"),
+    )
+    keypad_builder.row(
+        ChatKeypadBuilder().button(id="cat_متفرقه", text="📦 متفرقه"),
+    )
+    keypad_builder.row(ChatKeypadBuilder().button(id="back_to_menu", text="🔙 بازگشت به منو"))
+    await message.reply_keypad("🗂️ **انتخاب دسته‌بندی:**", keypad_builder.build())
+
+async def show_products_page(message, user_id, bot):
+    cart = get_cart(user_id)
+    category = cart['current_category']
+    page = cart['current_page']
+    filtered = [p for p in all_products if p['category'] == category]
+    
+    per_page = 20
+    total_pages = (len(filtered) + per_page - 1) // per_page
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_items = filtered[start:end]
+
+    if not page_items:
+        await message.reply("❌ محصولی در این دسته یافت نشد.")
+        return
+
+    keypad_builder = ChatKeypadBuilder()
+    row = []
+    for i, product in enumerate(page_items, 1):
+        short_name = product['name'][:20]
+        row.append(ChatKeypadBuilder().button(id=f"select_{product['name']}", text=short_name))
+        if len(row) == 4:
+            keypad_builder.row(*row)
+            row = []
+    if row:
+        keypad_builder.row(*row)
+
+    nav_row = []
+    if page > 1:
+        nav_row.append(ChatKeypadBuilder().button(id="prev_page", text="⏮️ قبلی"))
+    nav_row.append(ChatKeypadBuilder().button(id="back_to_categories", text="🗂️ دسته‌ها"))
+    if page < total_pages:
+        nav_row.append(ChatKeypadBuilder().button(id="next_page", text="بعدی ⏭️"))
+    if nav_row:
+        keypad_builder.row(*nav_row)
+    keypad_builder.row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید"))
+
+    text = f"📦 **لیست محصولات (دسته: {category})**\nصفحه {page} از {total_pages}\n"
+    await message.reply_keypad(text, keypad_builder.build())
+
+async def show_search_results(message, user_id, bot):
+    cart = get_cart(user_id)
+    query = cart.get('search_query', '')
+    if not query:
+        await message.reply("🔍 لطفاً نام محصول مورد نظر خود را تایپ کنید (مثلاً: پوما، کفش، ساناز...):")
+        return
+
+    filtered = [p for p in all_products if query.lower() in p['name'].lower()]
+    
+    if not filtered:
+        await message.reply("❌ هیچ محصولی با این نام پیدا نشد.\n\nبرای جستجوی دوباره روی 🔍 جستجو کلیک کنید.")
+        return
+
+    keypad_builder = ChatKeypadBuilder()
+    row = []
+    for product in filtered:
+        short_name = product['name'][:20]
+        row.append(ChatKeypadBuilder().button(id=f"select_{product['name']}", text=short_name))
+        if len(row) == 4:
+            keypad_builder.row(*row)
+            row = []
+    if row:
+        keypad_builder.row(*row)
+
+    keypad_builder.row(
+        ChatKeypadBuilder().button(id="new_search", text="🔍 جستجوی جدید"),
+        ChatKeypadBuilder().button(id="back_to_menu", text="🔙 منو"),
+    )
+    keypad_builder.row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید"))
+
+    text = f"🔍 **نتایج جستجو برای `{query}`** ({len(filtered)} محصول)"
+    await message.reply_keypad(text, keypad_builder.build())
+
+async def show_cart_internal(bot, message, user_id):
+    cart = get_cart(user_id)
+    if len(cart['items']) == 0:
+        await message.reply("🛒 سبد خرید شما خالی است!")
+        return
+    
+    total = 0
+    text = "🛒 **سبد خرید شما:**\n\n"
+    keypad_builder = ChatKeypadBuilder()
+    row = []
+    
+    for i, item in enumerate(cart['items'], 1):
+        pair_count = item.get('pairCount', 1)
+        subtotal = item['price'] * pair_count * item['quantity']
+        total += subtotal
+        text += f"{i}. **{item['name']}**\n"
+        text += f"   تعداد کارتن: {item['quantity']}\n"
+        text += f"   تعداد جفت: {pair_count}\n"
+        text += f"   قیمت هر جفت: {format_price(item['price'])} تومان\n"
+        text += f"   **مجموع: {format_price(subtotal)} تومان**\n\n"
+        short_name = item['name'][:20]
+        row.append(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ حذف {short_name}"))
+        if len(row) == 2:
+            keypad_builder.row(*row)
+            row = []
+    
+    if row:
+        keypad_builder.row(*row)
+    text += f"━━━━━━━━━━━━━━━━\n"
+    text += f"💰 **جمع کل: {format_price(total)} تومان**"
+    keypad_builder.row(ChatKeypadBuilder().button(id="checkout", text="✅ نهایی‌سازی سفارش"))
+    keypad_builder.row(ChatKeypadBuilder().button(id="clear_cart", text="🗑️ خالی کردن سبد"))
+    keypad_builder.row(ChatKeypadBuilder().button(id="back_to_menu", text="🔙 بازگشت به منو"))
+    await message.reply_keypad(text, keypad_builder.build())
 
 # ============================================================
 # 📤 ارسال لینک به کانال
@@ -545,195 +442,289 @@ async def send_link_to_channel(chat_id, product):
     )
 
 # ============================================================
-# 📤 نمایش لیست محصولات
+# 🖼️ تولید فاکتور
 # ============================================================
 
-async def show_products_list(message: Message, user_id: str):
-    if not all_products:
-        await message.reply("❌ هنوز محصولی در فروشگاه ثبت نشده است.")
-        return
-    text = "📦 **لیست محصولات:**\n\n"
-    for i, product in enumerate(all_products, 1):
-        text += f"{i}. {product['name']}\n"
-        text += f"   💰 قیمت هر جفت: {format_price(product['price'])} تومان\n"
-        text += f"   📦 تعداد جفت: {product.get('pairCount', 'نامشخص')}\n\n"
-    text += f"\n🔢 **برای سفارش، روی نام محصول کلیک کنید.**"
-    keypad_builder = ChatKeypadBuilder()
-    row = []
-    for i, product in enumerate(all_products, 1):
-        row.append(ChatKeypadBuilder().button(id=f"select_{product['name']}", text=f"{i}. {product['name']}"))
-        if len(row) == 2:
-            keypad_builder.row(*row)
-            row = []
-    if row:
-        keypad_builder.row(*row)
-    keypad_builder.row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید"))
-    keypad_builder.row(ChatKeypadBuilder().button(id="back_menu", text="🔙 بازگشت به منو"))
-    keypad = keypad_builder.build()
-    await message.reply_keypad(text, keypad)
+def persian_text(text):
+    if not text:
+        return ""
+    try:
+        reshaped = arabic_reshaper.reshape(text)
+        return get_display(reshaped)
+    except:
+        return text
 
-# ============================================================
-# 🔍 جستجوی زنده
-# ============================================================
-
-async def show_search_keypad(message: Message, user_id: str, bot: Robot):
-    cart = get_cart(user_id)
-    query = cart.get('search_query', '')
-    keypad_builder = ChatKeypadBuilder()
-    row = []
-    for i, letter in enumerate(PERSIAN_LETTERS):
-        row.append(ChatKeypadBuilder().button(id=f"search_letter_{letter}", text=letter))
-        if len(row) == 4:
-            keypad_builder.row(*row)
-            row = []
-    if row:
-        keypad_builder.row(*row)
-    num_row = []
-    for num in NUMBERS:
-        num_row.append(ChatKeypadBuilder().button(id=f"search_letter_{num}", text=num))
-    keypad_builder.row(*num_row)
-    keypad_builder.row(
-        ChatKeypadBuilder().button(id="search_backspace", text="⌫"),
-        ChatKeypadBuilder().button(id="search_clear", text="🗑️ پاک کردن"),
-        ChatKeypadBuilder().button(id="search_exit", text="❌ خروج")
-    )
-    keypad = keypad_builder.build()
-    search_text = f"🔍 **جستجوی محصولات**\n\nعبارت جستجو: `{query}`\n\n" if query else "🔍 **جستجوی محصولات**\n\nلطفاً حروف را انتخاب کنید.\n"
-    filtered = [p for p in all_products if query.lower() in p['name'].lower()] if query else []
-    if filtered:
-        search_text += f"\n✅ {len(filtered)} محصول پیدا شد:\n"
-        for i, prod in enumerate(filtered[:10]):
-            search_text += f"{i+1}. {prod['name']} - {format_price(prod['price'])} تومان\n"
-        if len(filtered) > 10:
-            search_text += f"\nو {len(filtered)-10} محصول دیگر ..."
-        prod_keypad_builder = ChatKeypadBuilder()
-        for prod in filtered[:10]:
-            prod_keypad_builder.row(
-                ChatKeypadBuilder().button(
-                    id=f"select_{prod['name']}",
-                    text=f"➕ {prod['name']}"
-                )
-            )
-        if len(filtered) > 10:
-            prod_keypad_builder.row(
-                ChatKeypadBuilder().button(
-                    id="search_show_more",
-                    text="📋 نمایش همه"
-                )
-            )
-        prod_keypad = prod_keypad_builder.build()
-        await bot.send_message(
-            chat_id=message.chat_id,
-            text=search_text,
-            inline_keypad=prod_keypad
-        )
+def create_invoice_image(customer, items, total, previous_debt, invoice_number, customer_code):
+    margin = 80
+    width = 3200
+    row_height = 120
+    header_height = 280
+    customer_height = 200
+    table_header_height = 100
+    footer_height = 280
+    height = margin + header_height + customer_height + table_header_height + (len(items) * row_height) + 200 + footer_height + margin
+    if previous_debt > 0:
+        height += 100
+    image = Image.new('RGB', (width, height), color=(255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([(margin, margin), (width - margin, height - margin)], outline=(25, 70, 160), width=6)
+    font_paths = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/tahoma.ttf"]
+    font_found = None
+    for path in font_paths:
+        if os.path.exists(path):
+            font_found = path
+            break
+    if font_found:
+        try:
+            font_title = ImageFont.truetype(font_found, 76)
+            font_header = ImageFont.truetype(font_found, 56)
+            font_normal = ImageFont.truetype(font_found, 46)
+            font_bold = ImageFont.truetype(font_found, 50)
+            font_footer = ImageFont.truetype(font_found, 60)
+        except:
+            font_title = ImageFont.load_default(); font_header = ImageFont.load_default(); font_normal = ImageFont.load_default(); font_bold = ImageFont.load_default(); font_footer = ImageFont.load_default()
     else:
-        await bot.send_message(
-            chat_id=message.chat_id,
-            text=search_text,
-            inline_keypad=keypad
-        )
+        font_title = ImageFont.load_default(); font_header = ImageFont.load_default(); font_normal = ImageFont.load_default(); font_bold = ImageFont.load_default(); font_footer = ImageFont.load_default()
+    y = margin + 40
+    right_x = width - margin - 40
+    left_x = margin + 40
+    draw.text((width // 2, y), persian_text("فاکتور فروش"), fill=(25, 70, 160), font=font_title, anchor="mm")
+    draw.text((right_x, y), persian_text(f"شماره: {invoice_number}"), fill=(0, 0, 0), font=font_header, anchor="rm")
+    draw.text((right_x, y + 100), persian_text(f"کد مشتری: {customer_code}"), fill=(25, 70, 160), font=font_header, anchor="rm")
+    draw.text((right_x, y + 200), persian_text(f"تاریخ: {datetime.now().strftime('%Y/%m/%d')}"), fill=(100, 100, 100), font=font_header, anchor="rm")
+    y += 280
+    draw.rectangle([(margin + 20, y), (width - margin - 20, y + 200)], fill=(245, 248, 250), outline=(200, 210, 220), width=2)
+    draw.text((right_x, y + 40), persian_text(f"مشتری: {customer.get('name', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal, anchor="rm")
+    draw.text((right_x, y + 105), persian_text(f"تلفن: {customer.get('phone', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal, anchor="rm")
+    draw.text((right_x, y + 170), persian_text(f"آدرس: {customer.get('address', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal, anchor="rm")
+    draw.text((left_x, y + 40), persian_text(f"باربری: {customer.get('shipping', 'نامشخص')}"), fill=(0, 0, 0), font=font_normal, anchor="lm")
+    y += 250
+    table_left = margin + 20
+    table_right = width - margin - 20
+    col_widths = [100, 1000, 200, 200, 450, 600]
+    col_centers = []
+    current = table_right
+    for w in col_widths:
+        col_centers.append(current - w // 2)
+        current -= w
+    draw.rectangle([(table_left, y), (table_right, y + 100)], fill=(25, 70, 160))
+    headers = ["ردیف", "نام مدل", "کارتن", "جفت", "قیمت هر جفت", "مبلغ کل"]
+    for i, h in enumerate(headers):
+        draw.text((col_centers[i], y + 50), persian_text(h), fill=(255, 255, 255), font=font_bold, anchor="mm")
+    y += 100
+    for i, item in enumerate(items, 1):
+        if i % 2 == 0:
+            draw.rectangle([(table_left, y), (table_right, y + 110)], fill=(248, 250, 252))
+        draw.text((col_centers[0], y + 55), str(i), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[1], y + 55), persian_text(item['name'][:50]), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[2], y + 55), str(item['quantity']), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[3], y + 55), str(item['pairCount']), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[4], y + 55), format_price(item['price_per_pair']), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        draw.text((col_centers[5], y + 55), format_price(item['subtotal']), fill=(0, 0, 0), font=font_normal, anchor="mm")
+        y += 110
+    draw.line([(table_left, y), (table_right, y)], fill=(200, 210, 220), width=4)
+    y += 80
+    draw.text((right_x, y), persian_text(f"جمع سفارش جدید: {format_price(total)} تومان"), fill=(25, 70, 160), font=font_bold, anchor="rm")
+    y += 110
+    if previous_debt != 0:
+        if previous_debt < 0:
+            draw.text((right_x, y), persian_text(f"بستانکاری قبلی: {format_price(previous_debt)} تومان"), fill=(200, 50, 50), font=font_bold, anchor="rm")
+        else:
+            draw.text((right_x, y), persian_text(f"بدهی قبلی: {format_price(previous_debt)} تومان"), fill=(200, 50, 50), font=font_bold, anchor="rm")
+        y += 110
+        draw.text((right_x, y), persian_text(f"مبلغ قابل پرداخت: {format_price(total + previous_debt)} تومان"), fill=(0, 150, 0), font=font_bold, anchor="rm")
+    else:
+        draw.text((right_x, y), persian_text(f"مبلغ قابل پرداخت: {format_price(total)} تومان"), fill=(0, 150, 0), font=font_bold, anchor="rm")
+    y += 200
+    draw.text((width // 2, y), persian_text("از اعتماد شما سپاسگزاریم!"), fill=(150, 150, 150), font=font_footer, anchor="mm")
+    filename = f"invoices/invoice_{invoice_number}.png"
+    os.makedirs("invoices", exist_ok=True)
+    image.save(filename, "PNG", quality=100, dpi=(300, 300))
+    return filename
 
 # ============================================================
-# 💾 نهایی‌سازی سفارش
+# 💾 نهایی‌سازی سفارش (بدهی از شیت خوانده می‌شود)
+# ============================================================
+
+def ثبت_سفارش_در_شیت(customer, items, total, invoice_number, customer_code):
+    try:
+        payload = {
+            "action": "register", "timestamp": datetime.now().isoformat(),
+            "invoice_number": invoice_number, "customer_code": customer_code,
+            "customer_name": customer.get('name', ''), "customer_phone": customer.get('phone', ''),
+            "customer_address": customer.get('address', ''), "customer_shipping": customer.get('shipping', ''),
+            "total": total, "items": items
+        }
+        response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("status") == "success":
+                print(f"✅ سفارش {invoice_number} در گوگل‌شیت ثبت شد.")
+                return True
+        return False
+    except Exception as e:
+        print(f"❌ خطا در ثبت سفارش: {e}")
+        return False
+
+# ============================================================
+# 🆕 تابع استخراج نام بانک، صاحب حساب و مبلغ
+# ============================================================
+
+def extract_payment_info(text):
+    """
+    تلاش برای استخراج نام بانک، نام صاحب حساب و مبلغ از متن پیام.
+    فرمت‌های پشتیبانی‌شده:
+    - به صادرات احمد محمدی ۲۰۰۰۰۰۰ تایید شد
+    - واریز به ملی علی‌زاده ۱۵۰۰۰۰۰
+    - صادرات - رضا کریمی ۳۰۰۰۰۰۰
+    """
+    # ابتدا مبلغ را استخراج می‌کنیم
+    amount = extract_amount(text)
+    if not amount:
+        return None, None, None
+
+    # حذف مبلغ و کاما از متن
+    text_clean = re.sub(r'[\d,]+', '', text)
+    # حذف کلمات اضافی (تایید، شد، واریز، به، بانک، صاحب، حساب، : و ...)
+    text_clean = re.sub(r'(تایید|شد|واریز|به|بانک|صاحب|حساب|:|ریال|تومان)', '', text_clean, flags=re.IGNORECASE)
+    # حذف فاصله‌های اضافی
+    text_clean = re.sub(r'\s+', ' ', text_clean).strip()
+
+    words = text_clean.split()
+    if len(words) >= 2:
+        bank = words[0]
+        holder = ' '.join(words[1:])
+    elif len(words) == 1:
+        bank = words[0]
+        holder = ''
+    else:
+        bank = ''
+        holder = ''
+
+    return bank, holder, amount
+
+# ============================================================
+# 💳 به‌روزرسانی واریزی در شیت (با نام بانک و صاحب حساب)
+# ============================================================
+
+def به‌روزرسانی_واریزی_در_شیت(invoice_number, payment_amount, bank_name="", account_holder=""):
+    try:
+        payload = {
+            "action": "update_payment",
+            "invoice_number": invoice_number,
+            "payment_amount": payment_amount,
+            "bank_name": bank_name,
+            "account_holder": account_holder
+        }
+        response = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            result = response.json()
+            if result.get("status") == "success":
+                print(f"✅ واریزی {invoice_number} ثبت شد.")
+                msg = result.get("message", "")
+                if "تومان" not in msg or "فاکتور" not in msg:
+                    formatted_amount = f"{payment_amount:,}".replace(",", "٬")
+                    msg = f"واریزی {formatted_amount} تومان برای فاکتور {invoice_number} ثبت شد. بانک: {bank_name}، صاحب حساب: {account_holder}"
+                return True, msg
+        return False, f"❌ خطا: {response.text}"
+    except Exception as e:
+        return False, f"❌ خطا: {e}"
+
+# ============================================================
+# 🧾 نهایی‌سازی سفارش (بدون تغییر)
 # ============================================================
 
 async def finalize_order(message: Message, user_id: str, bot: Robot):
-    global customer_debts, last_invoice_for_admin
+    global customer_debts, last_invoice_for_admin, data
     cart = get_cart(user_id)
     customer = cart['customer']
     if len(cart['items']) == 0:
         await message.reply("❌ سبد خرید خالی است!")
         return
-    phone = customer.get('phone', '')
+    phone = normalize_phone(customer.get('phone', ''))
+    customer['phone'] = phone
     if len(phone.replace(' ', '').replace('-', '')) < 11:
         await message.reply("❌ شماره تماس معتبر نیست. حداقل ۱۱ رقم وارد کنید.")
         return
     customer_code = get_or_create_customer_code(phone)
+    
+    # دریافت بدهی از گوگل شیت
+    sheet_debt = get_customer_debt_from_sheet(customer_code)
+    if sheet_debt is not None:
+        previous_debt = sheet_debt
+        customer_debts[user_id] = previous_debt
+        data["customer_debts"] = customer_debts
+        save_data(data)
+    else:
+        previous_debt = customer_debts.get(user_id, 0)
+
     total = 0
     items_list = []
     for item in cart['items']:
         pair_count = item.get('pairCount', 1)
+        total_pairs = item.get('quantity', 0) * pair_count
         subtotal = item['price'] * pair_count * item['quantity']
         total += subtotal
         items_list.append({
-            'name': item['name'],
-            'quantity': item['quantity'],
-            'pairCount': pair_count,
-            'price_per_pair': item['price'],
+            'name': item['name'], 'quantity': item['quantity'],
+            'pairCount': total_pairs, 'price_per_pair': item['price'],
             'subtotal': subtotal
         })
-    previous_debt = customer_debts.get(user_id, 0)
+        
     total_payable = previous_debt + total
     invoice_number = generate_invoice_number()
+    
     try:
-        image_path = create_invoice_image(
-            customer=customer,
-            items=items_list,
-            total=total,
-            previous_debt=previous_debt,
-            invoice_number=invoice_number,
-            customer_code=customer_code
-        )
-        await bot.send_photo(
-            chat_id=message.chat_id,
-            photo=image_path,
-            caption=f"🧾 فاکتور شماره: {invoice_number}\n🆔 کد مشتری: {customer_code}"
-        )
+        image_path = create_invoice_image(customer, items_list, total, previous_debt, invoice_number, customer_code)
+        await bot.send_photo(chat_id=message.chat_id, photo=image_path, caption=f"🧾 فاکتور شماره: {invoice_number}\n🆔 کد مشتری: {customer_code}")
         if os.path.exists(image_path):
             os.remove(image_path)
     except Exception as e:
         print(f"⚠️ خطا در تولید فاکتور: {e}")
         await message.reply("⚠️ خطا در تولید فاکتور، لطفاً دوباره تلاش کنید.")
         return
+        
     try:
-        image_path = create_invoice_image(
-            customer=customer,
-            items=items_list,
-            total=total,
-            previous_debt=previous_debt,
-            invoice_number=invoice_number,
-            customer_code=customer_code
-        )
-        admin_msg = await bot.send_photo(
-            chat_id=ADMIN_CHAT_ID,
-            photo=image_path,
-            caption=f"📬 فاکتور جدید از مشتری: {customer.get('name', 'نامشخص')}\n🆔 کد مشتری: {customer_code}\n💳 بدهی فعلی: {format_price(total_payable)} تومان"
-        )
+        image_path = create_invoice_image(customer, items_list, total, previous_debt, invoice_number, customer_code)
+        admin_msg = await bot.send_photo(chat_id=ADMIN_CHAT_ID, photo=image_path, caption=f"📬 فاکتور جدید از مشتری: {customer.get('name', 'نامشخص')}\n🆔 کد مشتری: {customer_code}\n💳 بدهی فعلی: {format_price(total_payable)} تومان")
         if os.path.exists(image_path):
             os.remove(image_path)
         last_invoice_for_admin[user_id] = {
-            'message_id': admin_msg.message_id,
+            'message_id': admin_msg.message_id, 
             'chat_id': ADMIN_CHAT_ID,
             'user_name': customer.get('name', 'نامشخص'),
-            'total_payable': total_payable,
-            'invoice_number': invoice_number
+            'total_payable': total_payable, 
+            'invoice_number': invoice_number,
+            'customer_code': customer_code
         }
-        print(f"✅ فاکتور به حسابدار ارسال شد برای کاربر {user_id} با message_id: {admin_msg.message_id}")
+        data["last_invoice_for_admin"] = last_invoice_for_admin
+        save_data(data)
     except Exception as e:
         print(f"⚠️ خطا در ارسال فاکتور به حسابدار: {e}")
+        
     ثبت_سفارش_در_شیت(customer, items_list, total, invoice_number, customer_code)
     customer_debts[user_id] = total_payable
+    data["customer_debts"] = customer_debts
+    save_data(data)
+    
     cart['items'] = []
     cart['customer'] = {}
     cart['step'] = 'idle'
-    menu_keypad = ChatKeypadBuilder() \
-        .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
-        .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
-        .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
-        .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
-        .build()
+    menu_keypad = ChatKeypadBuilder()
+    menu_keypad.row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات"))
+    menu_keypad.row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو"))
+    menu_keypad.row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید"))
+    menu_keypad.row(ChatKeypadBuilder().button(id="help", text="📋 راهنما"))
     await message.reply_keypad(
         "✅ **سفارش شما با موفقیت ثبت شد!**\n\n"
         f"🆔 **کد مشتری شما: {customer_code}**\n"
-        "🔄 برای سفارش جدید، از منوی زیر استفاده کنید.\n"
-        f"💳 **بدهی شما: {format_price(total_payable)} تومان**\n\n"
+        f"💳 **وضعیت حساب شما: {format_price(total_payable)} تومان**\n\n"
         "📱 **برای تسویه حساب، پیامک تراکنش را همراه با مبلغ به این حساب ارسال کنید.**",
-        menu_keypad
+        menu_keypad.build()
     )
 
 # ============================================================
-# 🤖 ساخت ربات و هندلرها
+# 🤖 هندلر پیام‌ها
 # ============================================================
 
 bot = Robot(token=TOKEN)
@@ -743,45 +734,42 @@ async def handle_message(bot: Robot, message: Message):
     chat_id = message.chat_id
     user_id = message.author_guid
     text = message.text if message.text else ''
-    print(f"📩 پیام از: {chat_id}")
-    print(f"📝 متن: {text[:100] if text else '(خالی)'}")
+    
     if chat_id.startswith('c0'):
         product = detect_product(text)
         if not product:
-            print("❌ محصول تشخیص داده نشد!")
             return
         found = False
         for i, p in enumerate(all_products):
             if p['name'] == product['name']:
                 all_products[i]['price'] = product['price']
                 all_products[i]['pairCount'] = product.get('pairCount', 0)
+                all_products[i]['category'] = product.get('category', 'متفرقه')
                 save_products(all_products)
-                print(f"🔄 قیمت محصول {product['name']} به {format_price(product['price'])} تومان به‌روز شد!")
                 found = True
                 break
         if not found:
             all_products.append(product)
             save_products(all_products)
-            print(f"✅ محصول جدید: {product['name']} - قیمت: {format_price(product['price'])}")
         await send_link_to_channel(chat_id, product)
         return
+
     if chat_id.startswith('b0'):
         cart = get_cart(user_id)
         if text == '/start' or text == 'start':
-            menu_keypad = ChatKeypadBuilder() \
-                .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
-                .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
-                .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
-                .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
-                .build()
-            await message.reply_keypad(
-                "🏠 **به فروشگاه خوش آمدید!**\n\nاز منوی زیر انتخاب کنید:",
-                menu_keypad
-            )
+            await show_main_menu(message, user_id)
             return
-        if text == '/myid':
-            await message.reply(f"🆔 **آیدی عددی شما:**\n`{user_id}`\n\n🔹 شناسه چت شما: `{chat_id}`")
+        
+        if cart['step'] == 'searching':
+            query = text.strip()
+            if not query:
+                await message.reply("❌ لطفاً یک نام معتبر وارد کنید.")
+                return
+            cart['search_query'] = query
+            cart['step'] = 'idle'
+            await show_search_results(message, user_id, bot)
             return
+            
         if cart['step'] == 'waiting_quantity':
             try:
                 quantity = int(convert_persian_number(text))
@@ -801,7 +789,10 @@ async def handle_message(bot: Robot, message: Message):
             if success:
                 cart['step'] = 'idle'
                 cart['selected_product'] = None
-                await show_products_list(message, user_id)
+                if cart.get('search_query'):
+                    await show_search_results(message, user_id, bot)
+                else:
+                    await show_products_page(message, user_id, bot)
             return
         if cart['step'] == 'waiting_customer_name':
             cart['customer']['name'] = text
@@ -829,10 +820,9 @@ async def handle_message(bot: Robot, message: Message):
             return
 
         # ============================================================
-        # ✅ بخش اصلاح‌شده: پردازش پیام حسابدار (فقط این بخش تغییر کرده)
+        # 🧾 بخش ادمین (حسابدار) - با استخراج نام بانک و صاحب حساب
         # ============================================================
         if chat_id == ADMIN_CHAT_ID:
-            print(f"🔍 پیام از حسابدار با reply_to_message_id: {message.reply_to_message_id}")
             if message.reply_to_message_id:
                 found_user = None
                 found_info = None
@@ -842,80 +832,107 @@ async def handle_message(bot: Robot, message: Message):
                         found_info = info
                         break
                 if found_user and found_info:
-                    # 🔹 استفاده از تابع جدید برای تجزیه پیام
-                    amount, bank, holder = parse_admin_payment(text)
-                    if amount is None:
+                    # استخراج نام بانک، صاحب حساب و مبلغ
+                    bank, holder, amount = extract_payment_info(text)
+                    if amount:
+                        if not bank:
+                            bank = "نامشخص"
+                        if not holder:
+                            holder = "نامشخص"
+
+                        # محاسبه بدهی جدید
+                        customer_code = found_info.get('customer_code')
+                        sheet_debt = get_customer_debt_from_sheet(customer_code) if customer_code else None
+                        if sheet_debt is not None:
+                            current_debt = sheet_debt
+                        else:
+                            current_debt = customer_debts.get(found_user, 0)
+
+                        new_debt = current_debt - amount
+                        customer_debts[found_user] = new_debt
+                        data["customer_debts"] = customer_debts
+                        save_data(data)
+
+                        # ثبت واریزی در وب‌هوک با نام بانک و صاحب حساب
+                        result, msg = به‌روزرسانی_واریزی_در_شیت(
+                            found_info.get('invoice_number', ''),
+                            amount,
+                            bank_name=bank,
+                            account_holder=holder
+                        )
+
+                        # پاسخ به ادمین
+                        debt_status = f"بستانکاری: {format_price(abs(new_debt))}" if new_debt < 0 else f"بدهی: {format_price(new_debt)}"
+                        await message.reply(
+                            f"✅ **تسویه حساب انجام شد!**\n"
+                            f"👤 کاربر: {found_info['user_name']}\n"
+                            f"🏦 بانک: {bank}\n"
+                            f"👤 صاحب حساب: {holder}\n"
+                            f"💰 مبلغ واریز: {format_price(amount)} تومان\n"
+                            f"💳 وضعیت حساب: {debt_status}"
+                        )
+
+                        # ارسال پیام به کاربر
+                        try:
+                            await bot.send_message(
+                                chat_id=found_user,
+                                text=f"✅ **تسویه حساب شما تایید شد!**\n"
+                                     f"🏦 بانک: {bank}\n"
+                                     f"👤 صاحب حساب: {holder}\n"
+                                     f"💰 مبلغ واریز: {format_price(amount)} تومان\n"
+                                     f"💳 وضعیت حساب: {debt_status}"
+                            )
+                        except Exception as e:
+                            print(f"⚠️ خطا در ارسال پیام به کاربر: {e}")
+
+                        if result:
+                            await message.reply(msg)
+                        else:
+                            await message.reply(f"⚠️ {msg}")
+                        return
+                    else:
                         await message.reply("❌ مبلغ در پیامک تراکنش پیدا نشد! لطفاً عدد را وارد کنید.")
                         return
-
-                    current_debt = customer_debts.get(found_user, 0)
-                    new_debt = max(0, current_debt - amount)
-                    customer_debts[found_user] = new_debt
-
-                    await message.reply(
-                        f"✅ **تسویه حساب انجام شد!**\n\n"
-                        f"👤 کاربر: {found_info['user_name']}\n"
-                        f"💰 مبلغ واریز: {format_price(amount)} تومان\n"
-                        f"🏦 بانک: {bank}\n"
-                        f"👤 صاحب حساب: {holder}\n"
-                        f"💳 بدهی جدید: {format_price(new_debt)} تومان"
-                    )
-
-                    try:
-                        await bot.send_message(
-                            chat_id=found_user,
-                            text=f"✅ **تسویه حساب شما تایید شد!**\n"
-                                 f"💰 مبلغ واریز: {format_price(amount)} تومان\n"
-                                 f"💳 بدهی جدید: {format_price(new_debt)} تومان"
-                        )
-                    except Exception as e:
-                        print(f"⚠️ خطا در ارسال پیام به کاربر: {e}")
-
-                    # ✅ ثبت واریزی با اطلاعات کامل
-                    result, msg = به‌روزرسانی_واریزی_در_شیت(
-                        found_info.get('invoice_number', ''),
-                        amount,
-                        account_number=bank,
-                        account_holder=holder
-                    )
-                    if result:
-                        await message.reply(msg)
-                    else:
-                        await message.reply(f"⚠️ {msg}")
-                    return
                 else:
                     await message.reply("❌ فاکتور مورد نظر پیدا نشد! لطفاً روی فاکتور صحیح ریپلای کنید.")
                     return
             else:
                 await message.reply("📋 برای تایید تراکنش، روی فاکتور مورد نظر ریپلای بزنید و مبلغ را وارد کنید.")
                 return
-
         else:
+            # کاربر معمولی - ارسال پیامک تراکنش
             amount = extract_amount(text)
             if amount and user_id in last_invoice_for_admin:
                 invoice_info = last_invoice_for_admin[user_id]
+                # استخراج نام بانک و صاحب حساب (در صورت وجود)
+                bank, holder, _ = extract_payment_info(text)
+                if not bank:
+                    bank = "نامشخص"
+                if not holder:
+                    holder = "نامشخص"
                 try:
                     await bot.send_message(
                         chat_id=ADMIN_CHAT_ID,
                         text=f"📱 **پیامک تراکنش از مشتری:**\n"
                              f"👤 کاربر: {invoice_info['user_name']}\n"
+                             f"🏦 بانک: {bank}\n"
+                             f"👤 صاحب حساب: {holder}\n"
                              f"💰 مبلغ: {format_price(amount)} تومان\n"
                              f"📝 شماره تراکنش: {text[:100]}",
                         reply_to_message_id=invoice_info['message_id']
                     )
                     await message.reply("✅ پیامک تراکنش شما به حسابدار ارسال شد. پس از تایید، بدهی شما به‌روزرسانی می‌شود.")
-                    print(f"✅ پیامک تراکنش به فاکتور حسابدار ریپلای شد برای کاربر {user_id}")
                 except Exception as e:
                     print(f"⚠️ خطا در ارسال ریپلای: {e}")
                     await message.reply("⚠️ خطا در ارسال پیامک به حسابدار. لطفاً دوباره تلاش کنید.")
                 return
             else:
-                await message.reply(
-                    "📋 **منوی اصلی:**\n"
-                    "از دکمه‌های زیر استفاده کنید.\n"
-                    "برای جستجو، روی 🔍 جستجو کلیک کنید."
-                )
+                await message.reply("📋 **منوی اصلی:**\nاز دکمه‌های زیر استفاده کنید.")
                 return
+
+# ============================================================
+# 🎯 هندلر کلیک‌ها
+# ============================================================
 
 @bot.on_callback()
 async def handle_callback(bot: Robot, message: Message):
@@ -923,58 +940,53 @@ async def handle_callback(bot: Robot, message: Message):
     user_id = message.author_guid
     data = message.data
     cart = get_cart(user_id)
+
+    if data == 'back_to_menu':
+        await show_main_menu(message, user_id)
+        return
+    
     if data == 'search':
         cart['search_query'] = ''
-        await show_search_keypad(message, user_id, bot)
+        cart['step'] = 'searching'
+        await message.reply("🔍 **جستجوی محصولات**\n\nلطفاً نام محصول مورد نظر خود را تایپ کنید (مثلاً: پوما، کفش، ساناز...):")
         return
-    if data.startswith('search_letter_'):
-        letter = data.replace('search_letter_', '')
-        cart['search_query'] += letter
-        await show_search_keypad(message, user_id, bot)
-        return
-    if data == 'search_backspace':
-        cart['search_query'] = cart['search_query'][:-1]
-        await show_search_keypad(message, user_id, bot)
-        return
-    if data == 'search_clear':
+
+    if data == 'new_search':
         cart['search_query'] = ''
-        await show_search_keypad(message, user_id, bot)
+        cart['step'] = 'searching'
+        await message.reply("🔍 **جستجوی جدید**\n\nلطفاً نام محصول مورد نظر خود را تایپ کنید:")
         return
-    if data == 'search_exit':
-        cart['search_query'] = ''
-        menu_keypad = ChatKeypadBuilder() \
-            .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
-            .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
-            .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
-            .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
-            .build()
-        await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
-        return
-    if data == 'search_show_more':
-        query = cart.get('search_query', '')
-        filtered = [p for p in all_products if query.lower() in p['name'].lower()] if query else []
-        if filtered:
-            text = f"🔍 **نتایج جستجو برای `{query}`**\n\n"
-            for i, prod in enumerate(filtered, 1):
-                text += f"{i}. {prod['name']} - {format_price(prod['price'])} تومان\n"
-            text += "\nبرای سفارش، روی دکمه محصول کلیک کنید."
-            keypad_builder = ChatKeypadBuilder()
-            for prod in filtered[:20]:
-                keypad_builder.row(
-                    ChatKeypadBuilder().button(
-                        id=f"select_{prod['name']}",
-                        text=f"➕ {prod['name']}"
-                    )
-                )
-            keypad_builder.row(ChatKeypadBuilder().button(id="search_exit", text="🔙 بازگشت"))
-            keypad = keypad_builder.build()
-            await message.reply_keypad(text, keypad)
-        else:
-            await message.reply("❌ هیچ محصولی یافت نشد.")
-        return
+
     if data == 'show_products':
-        await show_products_list(message, user_id)
+        await show_categories_menu(message, user_id, bot)
         return
+    
+    if data.startswith('cat_'):
+        category = data.replace('cat_', '')
+        cart['current_category'] = category
+        cart['current_page'] = 1
+        cart['search_query'] = ''
+        await show_products_page(message, user_id, bot)
+        return
+
+    if data == 'back_to_categories':
+        await show_categories_menu(message, user_id, bot)
+        return
+
+    if data == 'next_page':
+        cart['current_page'] += 1
+        await show_products_page(message, user_id, bot)
+        return
+
+    if data == 'prev_page':
+        cart['current_page'] -= 1
+        await show_products_page(message, user_id, bot)
+        return
+
+    if data == 'show_cart':
+        await show_cart_internal(bot, message, user_id)
+        return
+
     if data.startswith('select_'):
         product_name = data.replace('select_', '')
         product = next((p for p in all_products if p['name'] == product_name), None)
@@ -984,37 +996,8 @@ async def handle_callback(bot: Robot, message: Message):
         cart['selected_product'] = product
         cart['step'] = 'waiting_quantity'
         await message.reply(
-            f"📦 **{product['name']}**\n"
-            f"💰 قیمت هر جفت: {format_price(product['price'])} تومان\n"
-            f"📦 تعداد جفت: {product.get('pairCount', 'نامشخص')}\n\n"
-            f"🔢 **تعداد کارتن مورد نظر را وارد کنید:**"
+            f"📦 **{product['name']}**\n💰 قیمت هر جفت: {format_price(product['price'])} تومان\n📦 تعداد جفت: {product.get('pairCount', 'نامشخص')}\n\n🔢 **تعداد کارتن مورد نظر را وارد کنید:**"
         )
-        return
-    if data == 'show_cart':
-        if len(cart['items']) == 0:
-            await message.reply("🛒 سبد خرید شما خالی است!")
-            return
-        text = "🛒 **سبد خرید شما:**\n\n"
-        total = 0
-        for i, item in enumerate(cart['items'], 1):
-            pair_count = item.get('pairCount', 1)
-            subtotal = item['price'] * pair_count * item['quantity']
-            total += subtotal
-            text += f"{i}. {item['name']}\n"
-            text += f"   تعداد کارتن: {item['quantity']}\n"
-            text += f"   تعداد جفت: {pair_count}\n"
-            text += f"   قیمت هر جفت: {format_price(item['price'])} تومان\n"
-            text += f"   مجموع: {format_price(subtotal)} تومان\n\n"
-        text += f"━━━━━━━━━━━━━━━━\n"
-        text += f"💰 **جمع کل: {format_price(total)} تومان**\n\n"
-        keypad_builder = ChatKeypadBuilder()
-        for i, item in enumerate(cart['items'], 1):
-            keypad_builder.row(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ حذف {item['name']}"))
-        keypad_builder.row(ChatKeypadBuilder().button(id="checkout", text="✅ نهایی‌سازی سفارش"))
-        keypad_builder.row(ChatKeypadBuilder().button(id="clear_cart", text="🗑️ خالی کردن سبد"))
-        keypad_builder.row(ChatKeypadBuilder().button(id="back_menu", text="🔙 بازگشت به منو"))
-        keypad = keypad_builder.build()
-        await message.reply_keypad(text, keypad)
         return
     if data.startswith('remove_'):
         product_name = data.replace('remove_', '')
@@ -1022,89 +1005,34 @@ async def handle_callback(bot: Robot, message: Message):
         await message.reply(f"🗑️ **{product_name}** از سبد خرید حذف شد.")
         if len(cart['items']) == 0:
             await message.reply("🛒 سبد خرید شما خالی است.")
-            menu_keypad = ChatKeypadBuilder() \
-                .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
-                .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
-                .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
-                .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
-                .build()
-            await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
+            await show_main_menu(message, user_id)
         else:
             await show_cart_internal(bot, message, user_id)
         return
     if data == 'clear_cart':
         cart['items'] = []
         await message.reply("🗑️ **سبد خرید شما خالی شد.**")
-        menu_keypad = ChatKeypadBuilder() \
-            .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
-            .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
-            .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
-            .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
-            .build()
-        await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
+        await show_main_menu(message, user_id)
         return
     if data == 'checkout':
         if len(cart['items']) == 0:
             await message.reply("❌ سبد خرید خالی است!")
             return
         cart['step'] = 'waiting_customer_name'
-        await message.reply(
-            "✅ **مرحله نهایی‌سازی سفارش**\n\n"
-            "لطفاً اطلاعات زیر را وارد کنید:\n\n"
-            "1️⃣ **نام و نام خانوادگی:**"
-        )
-        return
-    if data == 'back_menu':
-        menu_keypad = ChatKeypadBuilder() \
-            .row(ChatKeypadBuilder().button(id="show_products", text="📦 مشاهده محصولات")) \
-            .row(ChatKeypadBuilder().button(id="search", text="🔍 جستجو")) \
-            .row(ChatKeypadBuilder().button(id="show_cart", text="🛒 سبد خرید")) \
-            .row(ChatKeypadBuilder().button(id="help", text="📋 راهنما")) \
-            .build()
-        await message.reply_keypad("🏠 **منوی اصلی:**", menu_keypad)
+        await message.reply("✅ **مرحله نهایی‌سازی سفارش**\n\n1️⃣ **نام و نام خانوادگی:**")
         return
     if data == 'help':
         await message.reply(
-            "📋 **راهنمای فروشگاه:**\n\n"
+            "📋 **راهنمای فروشگاه:**\n"
             "1️⃣ از منوی اصلی، **مشاهده محصولات** یا **جستجو** را انتخاب کنید.\n"
-            "2️⃣ در جستجو، حروف را انتخاب کنید تا محصولات فیلتر شوند.\n"
+            "2️⃣ در جستجو، نام محصول را تایپ کنید تا نتایج نمایش داده شود.\n"
             "3️⃣ روی محصول مورد نظر کلیک کنید و تعداد کارتن را وارد کنید.\n"
             "4️⃣ **بدون برگشت به منو**، محصول بعدی را انتخاب کنید.\n"
-            "5️⃣ در انتها **سبد خرید** را باز کنید.\n"
-            "6️⃣ می‌توانید هر محصول را حذف کنید یا سبد را خالی کنید.\n"
-            "7️⃣ **نهایی‌سازی** را بزنید و مشخصات خود را وارد کنید.\n"
-            "8️⃣ فاکتور تصویری با کیفیت بالا نمایش داده می‌شود.\n"
-            "9️⃣ برای تسویه حساب، پیامک تراکنش را همراه با مبلغ به این حساب ارسال کنید."
+            "5️⃣ در انتها **سبد خرید** را باز کنید و **نهایی‌سازی** را بزنید.\n"
+            "6️⃣ برای تسویه حساب، پیامک تراکنش را همراه با مبلغ به این حساب ارسال کنید."
         )
         return
     await message.reply("❌ دکمه نامعتبر!")
-
-async def show_cart_internal(bot: Robot, message: Message, user_id: str):
-    cart = get_cart(user_id)
-    if len(cart['items']) == 0:
-        await message.reply("🛒 سبد خرید شما خالی است!")
-        return
-    text = "🛒 **سبد خرید شما:**\n\n"
-    total = 0
-    for i, item in enumerate(cart['items'], 1):
-        pair_count = item.get('pairCount', 1)
-        subtotal = item['price'] * pair_count * item['quantity']
-        total += subtotal
-        text += f"{i}. {item['name']}\n"
-        text += f"   تعداد کارتن: {item['quantity']}\n"
-        text += f"   تعداد جفت: {pair_count}\n"
-        text += f"   قیمت هر جفت: {format_price(item['price'])} تومان\n"
-        text += f"   مجموع: {format_price(subtotal)} تومان\n\n"
-    text += f"━━━━━━━━━━━━━━━━\n"
-    text += f"💰 **جمع کل: {format_price(total)} تومان**\n\n"
-    keypad_builder = ChatKeypadBuilder()
-    for i, item in enumerate(cart['items'], 1):
-        keypad_builder.row(ChatKeypadBuilder().button(id=f"remove_{item['name']}", text=f"🗑️ حذف {item['name']}"))
-    keypad_builder.row(ChatKeypadBuilder().button(id="checkout", text="✅ نهایی‌سازی سفارش"))
-    keypad_builder.row(ChatKeypadBuilder().button(id="clear_cart", text="🗑️ خالی کردن سبد"))
-    keypad_builder.row(ChatKeypadBuilder().button(id="back_menu", text="🔙 بازگشت به منو"))
-    keypad = keypad_builder.build()
-    await message.reply_keypad(text, keypad)
 
 # ============================================================
 # 🌐 Flask برای Keep-Alive
