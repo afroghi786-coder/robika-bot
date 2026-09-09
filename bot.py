@@ -1,5 +1,5 @@
 # ============================================================
-# 🤖 ربات فروشگاهی + آگهی‌های دیواری + کاریابی (نسخه نهایی)
+# 🤖 ربات فروشگاهی + آگهی‌های دیواری + کاریابی (نسخه بدون تصویر)
 # ============================================================
 
 from rubka import Robot, Message
@@ -15,7 +15,6 @@ import threading
 from flask import Flask, request, jsonify
 import requests
 import logging
-import uuid
 
 logging.basicConfig(level=logging.INFO)
 
@@ -326,7 +325,7 @@ def get_cart(user_id):
             'ad_data': {},
             'ad_type': None,
             'ad_category_path': '',
-            'ad_images': []
+            'ad_images': []  # دیگر استفاده نمی‌شود اما برای جلوگیری از خطا نگه داشته شده
         }
     return carts[user_id]
 
@@ -548,7 +547,7 @@ async def show_ad_detail(message, user_id, ad_id, bot):
     await message.reply_keypad(text, keypad.build())
 
 # ============================================================
-# 📝 جریان ثبت آگهی
+# 📝 جریان ثبت آگهی (بدون بخش تصویر)
 # ============================================================
 
 async def start_new_ad(message, user_id):
@@ -913,7 +912,7 @@ async def handle_message(bot: Robot, message: Message):
             return
 
         # ============================================================
-        # 🆕 بخش ثبت آگهی (باید قبل از سایر stepها بررسی شود)
+        # 🆕 بخش ثبت آگهی (بدون عکس)
         # ============================================================
         if cart.get('ad_step'):
             # مرحله دریافت عنوان
@@ -956,40 +955,27 @@ async def handle_message(bot: Robot, message: Message):
                 except:
                     await message.reply("❌ لطفاً یک عدد معتبر وارد کنید:")
                     return
-                cart['ad_step'] = 'upload_photo'
-                await message.reply("🖼️ **تصویر** آگهی را ارسال کنید (حداقل یک تصویر الزامی است).\nبرای ارسال، روی 📎 کلیک کنید و عکس را انتخاب کنید.")
+                # بعد از تعداد جفت، مستقیم به تأیید نهایی می‌رویم (بدون عکس)
+                cart['ad_step'] = 'confirm_ad'
+                ad_data = cart['ad_data']
+                summary = (
+                    f"📋 **خلاصه آگهی:**\n"
+                    f"نوع: {cart.get('ad_type', 'نامشخص')}\n"
+                    f"دسته: {ad_data.get('category_path', 'نامشخص')}\n"
+                    f"عنوان: {ad_data.get('title', '')}\n"
+                    f"توضیحات: {ad_data.get('description', '')}\n"
+                    f"قیمت: {format_price(ad_data.get('price', 0))} تومان\n"
+                    f"تعداد جفت: {ad_data.get('pairCount', 0)}\n"
+                    f"تعداد تصاویر: ۰ (بدون تصویر)\n\n"
+                    f"آیا اطلاعات صحیح است؟ (برای تایید 'بله' و برای اصلاح 'خیر' بفرستید)"
+                )
+                await message.reply(summary)
                 return
-
-            if cart['ad_step'] == 'upload_photo':
-                # اگر کاربر متن 'پایان' را ارسال کرد، برو به تایید
-                if text.strip() == 'پایان':
-                    if not cart['ad_images']:
-                        await message.reply("❌ حداقل یک تصویر باید ارسال کنید. لطفاً یک عکس ارسال کنید.")
-                        return
-                    cart['ad_step'] = 'confirm_ad'
-                    ad_data = cart['ad_data']
-                    summary = (
-                        f"📋 **خلاصه آگهی:**\n"
-                        f"نوع: {cart.get('ad_type', 'نامشخص')}\n"
-                        f"دسته: {ad_data.get('category_path', 'نامشخص')}\n"
-                        f"عنوان: {ad_data.get('title', '')}\n"
-                        f"توضیحات: {ad_data.get('description', '')}\n"
-                        f"قیمت: {format_price(ad_data.get('price', 0))} تومان\n"
-                        f"تعداد جفت: {ad_data.get('pairCount', 0)}\n"
-                        f"تعداد تصاویر: {len(cart['ad_images'])}\n\n"
-                        f"آیا اطلاعات صحیح است؟ (برای تایید 'بله' و برای اصلاح 'خیر' بفرستید)"
-                    )
-                    await message.reply(summary)
-                    return
-                else:
-                    # اگر کاربر در مرحله آپلود عکس است و متنی غیر از 'پایان' فرستاد، به او بگوییم عکس بفرستد.
-                    await message.reply("❌ لطفاً یک تصویر ارسال کنید یا 'پایان' را بفرستید.")
-                    return
 
             if cart['ad_step'] == 'confirm_ad':
                 if text.strip() == 'بله':
                     ad_data = cart['ad_data']
-                    if not ad_data.get('title') or not cart['ad_images']:
+                    if not ad_data.get('title'):
                         await message.reply("❌ اطلاعات ناقص! لطفاً دوباره ثبت آگهی را شروع کنید.")
                         cart['ad_step'] = None
                         return
@@ -1002,7 +988,7 @@ async def handle_message(bot: Robot, message: Message):
                         "description": ad_data.get('description', ''),
                         "price": ad_data.get('price', 0),
                         "pairCount": ad_data.get('pairCount', 0),
-                        "images": cart['ad_images'],
+                        "images": [],  # بدون تصویر
                         "contact_phone": ad_data.get('contact_phone', ''),
                         "status": "pending",
                         "created_at": datetime.now().isoformat()
