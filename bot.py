@@ -351,39 +351,29 @@ async def show_main_menu(message, user_id):
     await message.reply_keypad("🏠 **منوی اصلی فروشگاه و آگهی‌ها:**", keypad_builder.build())
 
 # ============================================================
-# 🗂️ نمایش دسته‌بندی‌های محصولات (برای خرید) - ترکیبی از ثابت و پویا
+# 🗂️ نمایش دسته‌بندی‌های محصولات (برای خرید) - ثابت مانند کد قدیمی
 # ============================================================
 
 async def show_categories_menu(message, user_id, bot):
     keypad = ChatKeypadBuilder()
-    # دکمه همه محصولات
-    keypad.row(ChatKeypadBuilder().button(id="cat_همه محصولات", text="📦 همه محصولات"))
-    
-    # دسته‌بندی‌های ثابت (پیش‌فرض)
-    default_categories = ["مردانه", "زنانه", "میانه", "بچگانه", "دخترانه", "پسرانه", "متفرقه"]
-    
-    # دسته‌بندی‌های موجود در محصولات
-    product_categories = set(p.get('category', 'متفرقه') for p in all_products)
-    
-    # ترکیب: همه دسته‌بندی‌های ثابت + هر دسته‌بندی جدیدی که در محصولات هست
-    all_cats = list(set(default_categories).union(product_categories))
-    
-    # نمایش به صورت دو تا دو تا در یک ردیف
-    row = []
-    for cat in sorted(all_cats):
-        # اگر دسته‌بندی‌های ثابت باشند، می‌توانید آیکون مناسب بذارید
-        icon = {
-            "مردانه": "👞", "زنانه": "👠", "میانه": "👟",
-            "بچگانه": "🧒", "دخترانه": "👧", "پسرانه": "👦",
-            "متفرقه": "📦"
-        }.get(cat, "📂")
-        row.append(ChatKeypadBuilder().button(id=f"cat_{cat}", text=f"{icon} {cat}"))
-        if len(row) == 2:
-            keypad.row(*row)
-            row = []
-    if row:
-        keypad.row(*row)
-    
+    keypad.row(
+        ChatKeypadBuilder().button(id="cat_همه محصولات", text="📦 همه محصولات"),
+    )
+    keypad.row(
+        ChatKeypadBuilder().button(id="cat_مردانه", text="👞 مردانه"),
+        ChatKeypadBuilder().button(id="cat_زنانه", text="👠 زنانه"),
+    )
+    keypad.row(
+        ChatKeypadBuilder().button(id="cat_میانه", text="👟 میانه"),
+        ChatKeypadBuilder().button(id="cat_بچگانه", text="🧒 بچگانه"),
+    )
+    keypad.row(
+        ChatKeypadBuilder().button(id="cat_دخترانه", text="👧 دخترانه"),
+        ChatKeypadBuilder().button(id="cat_پسرانه", text="👦 پسرانه"),
+    )
+    keypad.row(
+        ChatKeypadBuilder().button(id="cat_متفرقه", text="📦 متفرقه"),
+    )
     keypad.row(ChatKeypadBuilder().button(id="back_to_menu", text="🔙 بازگشت"))
     await message.reply_keypad("🗂️ **دسته‌بندی محصولات را انتخاب کنید:**", keypad.build())
 
@@ -896,25 +886,7 @@ async def handle_message(bot: Robot, message: Message):
     text = message.text if message.text else ''
     cart = get_cart(user_id)
 
-    # ========== پردازش عکس (برای ثبت آگهی) ==========
-    if message.photo:
-        if cart.get('ad_step') == 'upload_photo':
-            os.makedirs('ad_images', exist_ok=True)
-            file_id = message.photo.file_id
-            file_path = f"ad_images/{uuid.uuid4().hex}.jpg"
-            try:
-                await bot.download_file(file_id, file_path)
-                cart['ad_images'].append(file_path)
-                await message.reply(f"✅ تصویر {len(cart['ad_images'])} دریافت شد. تصویر دیگری ارسال کنید یا 'پایان' را بفرستید.")
-            except Exception as e:
-                await message.reply("⚠️ خطا در ذخیره تصویر. لطفاً دوباره تلاش کنید.")
-                logging.error(f"خطا در ذخیره تصویر: {e}")
-            return
-        else:
-            await message.reply("❌ لطفاً ابتدا ثبت آگهی را شروع کنید و در مرحله ارسال عکس باشید.")
-            return
-
-    # ========== بخش کانال (ادمین) ==========
+    # ========== بخش کانال (ادمین) - خواندن محصولات ==========
     if chat_id.startswith('c0'):
         product = detect_product(text)
         if not product:
@@ -940,6 +912,129 @@ async def handle_message(bot: Robot, message: Message):
         if text == '/start' or text == 'start':
             await show_main_menu(message, user_id)
             return
+
+        # ============================================================
+        # 🆕 بخش ثبت آگهی (باید قبل از سایر stepها بررسی شود)
+        # ============================================================
+        if cart.get('ad_step'):
+            # مرحله دریافت عنوان
+            if cart['ad_step'] == 'enter_title':
+                if not text.strip():
+                    await message.reply("❌ عنوان نمی‌تواند خالی باشد. لطفاً وارد کنید:")
+                    return
+                cart['ad_data']['title'] = text.strip()
+                cart['ad_step'] = 'enter_description'
+                await message.reply("📝 **توضیحات آگهی** را وارد کنید (می‌توانید خالی بگذارید):")
+                return
+
+            if cart['ad_step'] == 'enter_description':
+                cart['ad_data']['description'] = text.strip()
+                cart['ad_step'] = 'enter_price'
+                await message.reply("💰 **قیمت** را به تومان وارد کنید (اگر نامشخص است، ۰ وارد کنید):")
+                return
+
+            if cart['ad_step'] == 'enter_price':
+                try:
+                    price = int(convert_persian_number(text))
+                    if price < 0:
+                        await message.reply("❌ قیمت نمی‌تواند منفی باشد. دوباره وارد کنید:")
+                        return
+                    cart['ad_data']['price'] = price
+                except:
+                    await message.reply("❌ لطفاً یک عدد معتبر وارد کنید:")
+                    return
+                cart['ad_step'] = 'enter_pair_count'
+                await message.reply("📦 **تعداد جفت** (برای کالاها) را وارد کنید (برای استخدام ۰ وارد کنید):")
+                return
+
+            if cart['ad_step'] == 'enter_pair_count':
+                try:
+                    pair_count = int(convert_persian_number(text))
+                    if pair_count < 0:
+                        await message.reply("❌ عدد نمی‌تواند منفی باشد. دوباره وارد کنید:")
+                        return
+                    cart['ad_data']['pairCount'] = pair_count
+                except:
+                    await message.reply("❌ لطفاً یک عدد معتبر وارد کنید:")
+                    return
+                cart['ad_step'] = 'upload_photo'
+                await message.reply("🖼️ **تصویر** آگهی را ارسال کنید (حداقل یک تصویر الزامی است).\nبرای ارسال، روی 📎 کلیک کنید و عکس را انتخاب کنید.")
+                return
+
+            if cart['ad_step'] == 'upload_photo':
+                if text.strip() == 'پایان':
+                    if not cart['ad_images']:
+                        await message.reply("❌ حداقل یک تصویر باید ارسال کنید. لطفاً یک عکس ارسال کنید.")
+                        return
+                    cart['ad_step'] = 'confirm_ad'
+                    ad_data = cart['ad_data']
+                    summary = (
+                        f"📋 **خلاصه آگهی:**\n"
+                        f"نوع: {cart.get('ad_type', 'نامشخص')}\n"
+                        f"دسته: {ad_data.get('category_path', 'نامشخص')}\n"
+                        f"عنوان: {ad_data.get('title', '')}\n"
+                        f"توضیحات: {ad_data.get('description', '')}\n"
+                        f"قیمت: {format_price(ad_data.get('price', 0))} تومان\n"
+                        f"تعداد جفت: {ad_data.get('pairCount', 0)}\n"
+                        f"تعداد تصاویر: {len(cart['ad_images'])}\n\n"
+                        f"آیا اطلاعات صحیح است؟ (برای تایید 'بله' و برای اصلاح 'خیر' بفرستید)"
+                    )
+                    await message.reply(summary)
+                    return
+                else:
+                    await message.reply("❌ لطفاً یک تصویر ارسال کنید یا 'پایان' را بفرستید.")
+                    return
+
+            if cart['ad_step'] == 'confirm_ad':
+                if text.strip() == 'بله':
+                    ad_data = cart['ad_data']
+                    if not ad_data.get('title') or not cart['ad_images']:
+                        await message.reply("❌ اطلاعات ناقص! لطفاً دوباره ثبت آگهی را شروع کنید.")
+                        cart['ad_step'] = None
+                        return
+                    ad = {
+                        "id": len(all_ads) + 1,
+                        "seller_id": user_id,
+                        "type": cart.get('ad_type', 'product'),
+                        "category_path": ad_data.get('category_path', ''),
+                        "title": ad_data['title'],
+                        "description": ad_data.get('description', ''),
+                        "price": ad_data.get('price', 0),
+                        "pairCount": ad_data.get('pairCount', 0),
+                        "images": cart['ad_images'],
+                        "contact_phone": ad_data.get('contact_phone', ''),
+                        "status": "pending",
+                        "created_at": datetime.now().isoformat()
+                    }
+                    all_ads.append(ad)
+                    save_ads(all_ads)
+                    cart['ad_step'] = None
+                    cart['ad_data'] = {}
+                    cart['ad_images'] = []
+                    await bot.send_message(
+                        chat_id=ADMIN_CHAT_ID,
+                        text=f"📢 **آگهی جدید در انتظار تایید:**\n"
+                             f"👤 کاربر: {user_id}\n"
+                             f"📌 عنوان: {ad['title']}\n"
+                             f"🗂️ دسته: {ad['category_path']}\n"
+                             f"💰 قیمت: {format_price(ad['price'])} تومان\n"
+                             f"🆔 شناسه: {ad['id']}\n\n"
+                             f"برای تایید: /approve_{ad['id']}\n"
+                             f"برای رد: /reject_{ad['id']}"
+                    )
+                    await message.reply("✅ **آگهی شما با موفقیت ثبت شد و برای تایید به ادمین ارسال گردید.**")
+                    await show_main_menu(message, user_id)
+                    return
+                elif text.strip() == 'خیر':
+                    cart['ad_step'] = None
+                    cart['ad_data'] = {}
+                    cart['ad_images'] = []
+                    await message.reply("❌ ثبت آگهی لغو شد. می‌توانید دوباره شروع کنید.")
+                    await show_main_menu(message, user_id)
+                    return
+                else:
+                    await message.reply("❌ لطفاً 'بله' یا 'خیر' را وارد کنید.")
+                    return
 
         # ========== جستجو ==========
         if cart['step'] == 'searching':
@@ -1004,137 +1099,8 @@ async def handle_message(bot: Robot, message: Message):
             await finalize_order(message, user_id, bot)
             return
 
-        # ============================================================
-        # 🆕 بخش ثبت آگهی (چند مرحله‌ای)
-        # ============================================================
-        if cart.get('ad_step'):
-            # مرحله دریافت عنوان
-            if cart['ad_step'] == 'enter_title':
-                if not text.strip():
-                    await message.reply("❌ عنوان نمی‌تواند خالی باشد. لطفاً وارد کنید:")
-                    return
-                cart['ad_data']['title'] = text.strip()
-                cart['ad_step'] = 'enter_description'
-                await message.reply("📝 **توضیحات آگهی** را وارد کنید (می‌توانید خالی بگذارید):")
-                return
-
-            if cart['ad_step'] == 'enter_description':
-                cart['ad_data']['description'] = text.strip()
-                cart['ad_step'] = 'enter_price'
-                await message.reply("💰 **قیمت** را به تومان وارد کنید (اگر نامشخص است، ۰ وارد کنید):")
-                return
-
-            if cart['ad_step'] == 'enter_price':
-                try:
-                    price = int(convert_persian_number(text))
-                    if price < 0:
-                        await message.reply("❌ قیمت نمی‌تواند منفی باشد. دوباره وارد کنید:")
-                        return
-                    cart['ad_data']['price'] = price
-                except:
-                    await message.reply("❌ لطفاً یک عدد معتبر وارد کنید:")
-                    return
-                cart['ad_step'] = 'enter_pair_count'
-                await message.reply("📦 **تعداد جفت** (برای کالاها) را وارد کنید (برای استخدام ۰ وارد کنید):")
-                return
-
-            if cart['ad_step'] == 'enter_pair_count':
-                try:
-                    pair_count = int(convert_persian_number(text))
-                    if pair_count < 0:
-                        await message.reply("❌ عدد نمی‌تواند منفی باشد. دوباره وارد کنید:")
-                        return
-                    cart['ad_data']['pairCount'] = pair_count
-                except:
-                    await message.reply("❌ لطفاً یک عدد معتبر وارد کنید:")
-                    return
-                cart['ad_step'] = 'upload_photo'
-                await message.reply("🖼️ **تصویر** آگهی را ارسال کنید (حداقل یک تصویر الزامی است).\nبرای ارسال، روی 📎 کلیک کنید و عکس را انتخاب کنید.")
-                return
-
-            if cart['ad_step'] == 'upload_photo':
-                # اگر کاربر متن 'پایان' را ارسال کرد، برو به تایید
-                if text.strip() == 'پایان':
-                    if not cart['ad_images']:
-                        await message.reply("❌ حداقل یک تصویر باید ارسال کنید. لطفاً یک عکس ارسال کنید.")
-                        return
-                    cart['ad_step'] = 'confirm_ad'
-                    # نمایش خلاصه و تایید
-                    ad_data = cart['ad_data']
-                    summary = (
-                        f"📋 **خلاصه آگهی:**\n"
-                        f"نوع: {cart.get('ad_type', 'نامشخص')}\n"
-                        f"دسته: {ad_data.get('category_path', 'نامشخص')}\n"
-                        f"عنوان: {ad_data.get('title', '')}\n"
-                        f"توضیحات: {ad_data.get('description', '')}\n"
-                        f"قیمت: {format_price(ad_data.get('price', 0))} تومان\n"
-                        f"تعداد جفت: {ad_data.get('pairCount', 0)}\n"
-                        f"تعداد تصاویر: {len(cart['ad_images'])}\n\n"
-                        f"آیا اطلاعات صحیح است؟ (برای تایید 'بله' و برای اصلاح 'خیر' بفرستید)"
-                    )
-                    await message.reply(summary)
-                    return
-                else:
-                    await message.reply("❌ لطفاً یک تصویر ارسال کنید یا 'پایان' را بفرستید.")
-                    return
-
-            if cart['ad_step'] == 'confirm_ad':
-                if text.strip() == 'بله':
-                    # تایید نهایی
-                    ad_data = cart['ad_data']
-                    if not ad_data.get('title') or not cart['ad_images']:
-                        await message.reply("❌ اطلاعات ناقص! لطفاً دوباره ثبت آگهی را شروع کنید.")
-                        cart['ad_step'] = None
-                        return
-                    # ذخیره آگهی با وضعیت pending
-                    ad = {
-                        "id": len(all_ads) + 1,
-                        "seller_id": user_id,
-                        "type": cart.get('ad_type', 'product'),
-                        "category_path": ad_data.get('category_path', ''),
-                        "title": ad_data['title'],
-                        "description": ad_data.get('description', ''),
-                        "price": ad_data.get('price', 0),
-                        "pairCount": ad_data.get('pairCount', 0),
-                        "images": cart['ad_images'],
-                        "contact_phone": ad_data.get('contact_phone', ''),
-                        "status": "pending",
-                        "created_at": datetime.now().isoformat()
-                    }
-                    all_ads.append(ad)
-                    save_ads(all_ads)
-                    cart['ad_step'] = None
-                    cart['ad_data'] = {}
-                    cart['ad_images'] = []
-                    # اطلاع به ادمین
-                    await bot.send_message(
-                        chat_id=ADMIN_CHAT_ID,
-                        text=f"📢 **آگهی جدید در انتظار تایید:**\n"
-                             f"👤 کاربر: {user_id}\n"
-                             f"📌 عنوان: {ad['title']}\n"
-                             f"🗂️ دسته: {ad['category_path']}\n"
-                             f"💰 قیمت: {format_price(ad['price'])} تومان\n"
-                             f"🆔 شناسه: {ad['id']}\n\n"
-                             f"برای تایید: /approve_{ad['id']}\n"
-                             f"برای رد: /reject_{ad['id']}"
-                    )
-                    await message.reply("✅ **آگهی شما با موفقیت ثبت شد و برای تایید به ادمین ارسال گردید.**")
-                    await show_main_menu(message, user_id)
-                    return
-                elif text.strip() == 'خیر':
-                    cart['ad_step'] = None
-                    cart['ad_data'] = {}
-                    cart['ad_images'] = []
-                    await message.reply("❌ ثبت آگهی لغو شد. می‌توانید دوباره شروع کنید.")
-                    await show_main_menu(message, user_id)
-                    return
-                else:
-                    await message.reply("❌ لطفاً 'بله' یا 'خیر' را وارد کنید.")
-                    return
-
         # ========== بخش ادمین (حسابدار) ==========
         if chat_id == ADMIN_CHAT_ID:
-            # دستورات تایید/رد آگهی
             if text.startswith('/approve_'):
                 ad_id = int(text.split('_')[1])
                 ad = next((a for a in all_ads if a['id'] == ad_id), None)
@@ -1146,7 +1112,6 @@ async def handle_message(bot: Robot, message: Message):
                     return
                 ad['status'] = 'approved'
                 save_ads(all_ads)
-                # اضافه کردن به محصولات با دسته‌بندی قدیمی
                 if ad['type'] == 'product':
                     category = detect_category(ad['title'])
                     new_product = {
@@ -1157,7 +1122,6 @@ async def handle_message(bot: Robot, message: Message):
                     }
                     all_products.append(new_product)
                     save_products(all_products)
-                # پیام به کاربر
                 try:
                     await bot.send_message(
                         chat_id=ad['seller_id'],
@@ -1193,7 +1157,6 @@ async def handle_message(bot: Robot, message: Message):
                 await message.reply(f"❌ آگهی {ad['id']} رد شد.")
                 return
 
-            # تسویه حساب (ریپلای روی فاکتور)
             if message.reply_to_message_id:
                 found_user = None
                 found_info = None
@@ -1286,7 +1249,6 @@ async def handle_message(bot: Robot, message: Message):
                     await message.reply("⚠️ خطا در ارسال پیامک به حسابدار. لطفاً دوباره تلاش کنید.")
                 return
             else:
-                # منوی اصلی (در صورت عدم تطابق)
                 await message.reply("📋 **منوی اصلی:**\nاز دکمه‌های زیر استفاده کنید.")
                 return
 
@@ -1411,14 +1373,12 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ad_categories_for_view(message, user_id)
         return
 
-    # view_ad_main_*
     main_match = re.match(r'view_ad_main_(.+)', data)
     if main_match:
         main_cat = main_match.group(1)
         await show_ad_sub_categories(message, main_cat)
         return
 
-    # view_ad_sub_*
     sub_match = re.match(r'view_ad_sub_(.+?)_(.+)', data)
     if sub_match:
         main_cat = sub_match.group(1)
@@ -1426,7 +1386,6 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ad_leaf_categories(message, main_cat, sub_cat)
         return
 
-    # view_ad_leaf_*
     leaf_match = re.match(r'view_ad_leaf_(.+?)_(.+?)_(.+)', data)
     if leaf_match:
         main_cat = leaf_match.group(1)
@@ -1436,7 +1395,6 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ads_by_category(message, user_id, category_path)
         return
 
-    # ----- بازگشت در مشاهده آگهی -----
     if data == 'back_to_ad_main':
         await show_ad_categories_for_view(message, user_id)
         return
@@ -1461,14 +1419,12 @@ async def handle_callback(bot: Robot, message: Message):
             await show_ad_categories_for_view(message, user_id)
         return
 
-    # ----- مشاهده جزئیات آگهی -----
     detail_match = re.match(r'view_ad_detail_(\d+)', data)
     if detail_match:
         ad_id = int(detail_match.group(1))
         await show_ad_detail(message, user_id, ad_id, bot)
         return
 
-    # ----- سفارش از آگهی (کالا) -----
     order_match = re.match(r'order_ad_(\d+)', data)
     if order_match:
         ad_id = int(order_match.group(1))
@@ -1490,7 +1446,6 @@ async def handle_callback(bot: Robot, message: Message):
             await show_cart_internal(bot, message, user_id)
         return
 
-    # ----- تماس با کارفرما (استخدام) -----
     contact_match = re.match(r'contact_ad_(\d+)', data)
     if contact_match:
         ad_id = int(contact_match.group(1))
@@ -1520,7 +1475,6 @@ async def handle_callback(bot: Robot, message: Message):
         await start_new_ad(message, user_id)
         return
 
-    # ----- انتخاب نوع آگهی -----
     if data == 'ad_type_product':
         cart['ad_type'] = 'product'
         cart['ad_step'] = 'choose_main_cat'
@@ -1533,7 +1487,6 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ad_category_selection(message, user_id, 'main')
         return
 
-    # ----- انتخاب دسته‌بندی اصلی برای ثبت -----
     ad_main_match = re.match(r'ad_cat_main_(.+)', data)
     if ad_main_match:
         main_cat = ad_main_match.group(1)
@@ -1542,13 +1495,11 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ad_category_selection(message, user_id, 'sub')
         return
 
-    # ----- بازگشت به دسته‌بندی اصلی در ثبت -----
     if data == 'back_to_ad_main_cat':
         cart['ad_step'] = 'choose_main_cat'
         await show_ad_category_selection(message, user_id, 'main')
         return
 
-    # ----- انتخاب زیردسته برای ثبت -----
     ad_sub_match = re.match(r'ad_cat_sub_(.+?)_(.+)', data)
     if ad_sub_match:
         main_cat = ad_sub_match.group(1)
@@ -1559,7 +1510,6 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ad_category_selection(message, user_id, 'leaf')
         return
 
-    # ----- بازگشت به زیردسته در ثبت -----
     back_ad_sub_match = re.match(r'back_to_ad_sub_cat_(.+)', data)
     if back_ad_sub_match:
         main_cat = back_ad_sub_match.group(1)
@@ -1568,7 +1518,6 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ad_category_selection(message, user_id, 'sub')
         return
 
-    # ----- انتخاب برگ (آخرین سطح) برای ثبت -----
     ad_leaf_match = re.match(r'ad_cat_leaf_(.+?)_(.+?)_(.+)', data)
     if ad_leaf_match:
         main_cat = ad_leaf_match.group(1)
@@ -1580,7 +1529,6 @@ async def handle_callback(bot: Robot, message: Message):
         await message.reply("📝 **عنوان آگهی** را وارد کنید:")
         return
 
-    # ========== دکمه نامعتبر ==========
     await message.reply("❌ دکمه نامعتبر!")
 
 # ============================================================
