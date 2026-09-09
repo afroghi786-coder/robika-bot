@@ -886,6 +886,40 @@ async def handle_message(bot: Robot, message: Message):
     text = message.text if message.text else ''
     cart = get_cart(user_id)
 
+    # ========== پردازش عکس (برای ثبت آگهی) ==========
+    # ابتدا بررسی می‌کنیم که آیا عکس ارسال شده است
+    if message.photo:
+        logging.info(f"📸 عکس دریافت شد: {message.photo}")
+        if cart.get('ad_step') == 'upload_photo':
+            os.makedirs('ad_images', exist_ok=True)
+            # در rubka، message.photo ممکن است یک شیء با attribute file_id باشد یا لیستی از اشیاء
+            try:
+                # سعی می‌کنیم file_id را استخراج کنیم
+                if hasattr(message.photo, 'file_id'):
+                    file_id = message.photo.file_id
+                elif isinstance(message.photo, list) and len(message.photo) > 0:
+                    # اگر لیست است، معمولاً بزرگترین سایز را می‌گیریم
+                    file_id = message.photo[-1].file_id  # یا [0].file_id
+                else:
+                    file_id = None
+                
+                if not file_id:
+                    await message.reply("❌ خطا در دریافت شناسه تصویر. لطفاً دوباره ارسال کنید.")
+                    return
+                
+                file_path = f"ad_images/{uuid.uuid4().hex}.jpg"
+                # دانلود فایل
+                await bot.download_file(file_id, file_path)
+                cart['ad_images'].append(file_path)
+                await message.reply(f"✅ تصویر {len(cart['ad_images'])} دریافت شد. تصویر دیگری ارسال کنید یا 'پایان' را بفرستید.")
+            except Exception as e:
+                logging.error(f"❌ خطا در ذخیره تصویر: {e}")
+                await message.reply(f"⚠️ خطا در ذخیره تصویر: {str(e)}. لطفاً دوباره تلاش کنید.")
+            return
+        else:
+            await message.reply("❌ لطفاً ابتدا ثبت آگهی را شروع کنید و در مرحله ارسال عکس باشید.")
+            return
+
     # ========== بخش کانال (ادمین) - خواندن محصولات ==========
     if chat_id.startswith('c0'):
         product = detect_product(text)
@@ -962,6 +996,7 @@ async def handle_message(bot: Robot, message: Message):
                 return
 
             if cart['ad_step'] == 'upload_photo':
+                # اگر کاربر متن 'پایان' را ارسال کرد، برو به تایید
                 if text.strip() == 'پایان':
                     if not cart['ad_images']:
                         await message.reply("❌ حداقل یک تصویر باید ارسال کنید. لطفاً یک عکس ارسال کنید.")
