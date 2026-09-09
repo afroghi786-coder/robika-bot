@@ -215,6 +215,11 @@ BOT_USERNAME = "FroghiShopBot"
 ADMIN_CHAT_ID = "b0HWCJJ0xHE0e4e078b6c5228504866a"
 
 # ============================================================
+# 🆕 شناسه کانال برای انتشار آگهی‌های تاییدشده
+# ============================================================
+CHANNEL_ID = os.environ.get("CHANNEL_ID", "c0...")  # ← شناسه کانال خود را وارد کنید (با c0 شروع می‌شود)
+
+# ============================================================
 # 🔍 توابع کمکی
 # ============================================================
 
@@ -325,7 +330,7 @@ def get_cart(user_id):
             'ad_data': {},
             'ad_type': None,
             'ad_category_path': '',
-            'ad_images': []  # دیگر استفاده نمی‌شود اما برای جلوگیری از خطا نگه داشته شده
+            'ad_images': []
         }
     return carts[user_id]
 
@@ -845,7 +850,7 @@ async def finalize_order(message: Message, user_id: str, bot: Robot):
     await show_main_menu(message, user_id)
 
 # ============================================================
-# 📤 ارسال لینک به کانال
+# 📤 ارسال لینک به کانال (برای محصولات)
 # ============================================================
 
 async def send_link_to_channel(chat_id, product):
@@ -860,6 +865,44 @@ async def send_link_to_channel(chat_id, product):
     start_index = text.index(button_text)
     await bot.send_message(
         chat_id=chat_id,
+        text=text,
+        meta_data={
+            'meta_data_parts': [{
+                'type': 'Link',
+                'from_index': start_index,
+                'length': len(button_text),
+                'link_url': bot_link
+            }]
+        }
+    )
+
+# ============================================================
+# 🆕 ارسال آگهی تاییدشده به کانال
+# ============================================================
+
+async def send_ad_to_channel(ad):
+    """ارسال آگهی تاییدشده به کانال با لینک سفارش/تماس"""
+    bot_link = f"https://rubika.ir/{BOT_USERNAME}"
+    if ad.get('type') == 'product':
+        button_text = "🛒 سفارش این کالا"
+        # برای محصول، لینک به ربات با دستور سفارش
+        action = f"order_ad_{ad['id']}"
+    else:
+        button_text = "📩 تماس با کارفرما"
+        action = f"contact_ad_{ad['id']}"
+    
+    text = (
+        f"📢 **{ad.get('title', 'بدون عنوان')}**\n"
+        f"🗂️ دسته: {ad.get('category_path', 'نامشخص')}\n"
+        f"📝 توضیحات: {ad.get('description', '')}\n"
+        f"💰 قیمت: {format_price(ad.get('price', 0))} تومان\n"
+        f"📅 تاریخ ثبت: {ad.get('created_at', '')[:10]}\n\n"
+        f"{button_text}"
+    )
+    # برای لینک‌دار کردن دکمه، از meta_data استفاده می‌کنیم
+    start_index = text.index(button_text)
+    await bot.send_message(
+        chat_id=CHANNEL_ID,
         text=text,
         meta_data={
             'meta_data_parts': [{
@@ -1099,6 +1142,7 @@ async def handle_message(bot: Robot, message: Message):
                     return
                 ad['status'] = 'approved'
                 save_ads(all_ads)
+                # اضافه کردن به محصولات (اگر کالا باشد)
                 if ad['type'] == 'product':
                     category = detect_category(ad['title'])
                     new_product = {
@@ -1109,6 +1153,13 @@ async def handle_message(bot: Robot, message: Message):
                     }
                     all_products.append(new_product)
                     save_products(all_products)
+                # ارسال به کانال
+                try:
+                    await send_ad_to_channel(ad)
+                except Exception as e:
+                    logging.error(f"❌ خطا در ارسال آگهی به کانال: {e}")
+                    await message.reply(f"⚠️ آگهی تایید شد اما ارسال به کانال با خطا مواجه شد: {e}")
+                # پیام به کاربر
                 try:
                     await bot.send_message(
                         chat_id=ad['seller_id'],
@@ -1118,7 +1169,7 @@ async def handle_message(bot: Robot, message: Message):
                     )
                 except:
                     pass
-                await message.reply(f"✅ آگهی {ad['id']} تایید شد.")
+                await message.reply(f"✅ آگهی {ad['id']} تایید و به کانال ارسال شد.")
                 return
 
             if text.startswith('/reject_'):
