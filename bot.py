@@ -1276,7 +1276,7 @@ async def handle_message(bot: Robot, message: Message):
                 return
 
 # ============================================================
-# 🎯 هندلر کلیک‌ها
+# 🎯 هندلر کلیک‌ها (با استفاده از regex برای جلوگیری از خطا)
 # ============================================================
 
 @bot.on_callback()
@@ -1388,7 +1388,7 @@ async def handle_callback(bot: Robot, message: Message):
         return
 
     # ============================================================
-    # 🆕 بخش آگهی‌ها (مشاهده و ثبت)
+    # 🆕 بخش آگهی‌ها (مشاهده و ثبت) - با استفاده از regex
     # ============================================================
 
     # ----- مشاهده آگهی‌ها -----
@@ -1396,29 +1396,27 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ad_categories_for_view(message, user_id)
         return
 
-    if data.startswith('view_ad_main_'):
-        main_cat = data.replace('view_ad_main_', '')
+    # view_ad_main_*
+    main_match = re.match(r'view_ad_main_(.+)', data)
+    if main_match:
+        main_cat = main_match.group(1)
         await show_ad_sub_categories(message, main_cat)
         return
 
-    if data.startswith('view_ad_sub_'):
-        parts = data.split('_', 3)
-        main_cat = parts[3]
-        sub_cat = '_'.join(parts[4:]) if len(parts) > 4 else ''
-        if not sub_cat:
-            await message.reply("❌ خطا در پردازش دسته‌بندی.")
-            return
+    # view_ad_sub_*
+    sub_match = re.match(r'view_ad_sub_(.+?)_(.+)', data)
+    if sub_match:
+        main_cat = sub_match.group(1)
+        sub_cat = sub_match.group(2)
         await show_ad_leaf_categories(message, main_cat, sub_cat)
         return
 
-    if data.startswith('view_ad_leaf_'):
-        parts = data.split('_', 4)
-        main_cat = parts[3]
-        sub_cat = parts[4]
-        leaf = parts[5] if len(parts) > 5 else ''
-        if not leaf:
-            await message.reply("❌ خطا در پردازش دسته‌بندی.")
-            return
+    # view_ad_leaf_*
+    leaf_match = re.match(r'view_ad_leaf_(.+?)_(.+?)_(.+)', data)
+    if leaf_match:
+        main_cat = leaf_match.group(1)
+        sub_cat = leaf_match.group(2)
+        leaf = leaf_match.group(3)
         category_path = f"{main_cat}/{sub_cat}/{leaf}"
         await show_ads_by_category(message, user_id, category_path)
         return
@@ -1428,15 +1426,16 @@ async def handle_callback(bot: Robot, message: Message):
         await show_ad_categories_for_view(message, user_id)
         return
 
-    if data.startswith('back_to_ad_sub_'):
-        main_cat = data.replace('back_to_ad_sub_', '')
+    back_sub_match = re.match(r'back_to_ad_sub_(.+)', data)
+    if back_sub_match:
+        main_cat = back_sub_match.group(1)
         await show_ad_sub_categories(message, main_cat)
         return
 
-    if data.startswith('back_to_ad_leaf_'):
-        parts = data.split('_', 4)
-        main_cat = parts[3]
-        sub_cat = parts[4]
+    back_leaf_match = re.match(r'back_to_ad_leaf_(.+?)_(.+)', data)
+    if back_leaf_match:
+        main_cat = back_leaf_match.group(1)
+        sub_cat = back_leaf_match.group(2)
         await show_ad_leaf_categories(message, main_cat, sub_cat)
         return
 
@@ -1448,14 +1447,16 @@ async def handle_callback(bot: Robot, message: Message):
         return
 
     # ----- مشاهده جزئیات آگهی -----
-    if data.startswith('view_ad_detail_'):
-        ad_id = int(data.split('_')[3])
+    detail_match = re.match(r'view_ad_detail_(\d+)', data)
+    if detail_match:
+        ad_id = int(detail_match.group(1))
         await show_ad_detail(message, user_id, ad_id, bot)
         return
 
     # ----- سفارش از آگهی (کالا) -----
-    if data.startswith('order_ad_'):
-        ad_id = int(data.split('_')[2])
+    order_match = re.match(r'order_ad_(\d+)', data)
+    if order_match:
+        ad_id = int(order_match.group(1))
         ad = next((a for a in all_ads if a['id'] == ad_id), None)
         if not ad or ad['status'] != 'approved':
             await message.reply("❌ آگهی یافت نشد یا تایید نشده است.")
@@ -1475,8 +1476,9 @@ async def handle_callback(bot: Robot, message: Message):
         return
 
     # ----- تماس با کارفرما (استخدام) -----
-    if data.startswith('contact_ad_'):
-        ad_id = int(data.split('_')[2])
+    contact_match = re.match(r'contact_ad_(\d+)', data)
+    if contact_match:
+        ad_id = int(contact_match.group(1))
         ad = next((a for a in all_ads if a['id'] == ad_id), None)
         if not ad or ad['status'] != 'approved':
             await message.reply("❌ آگهی یافت نشد یا تایید نشده است.")
@@ -1517,8 +1519,9 @@ async def handle_callback(bot: Robot, message: Message):
         return
 
     # ----- انتخاب دسته‌بندی اصلی برای ثبت -----
-    if data.startswith('ad_cat_main_'):
-        main_cat = data.replace('ad_cat_main_', '')
+    ad_main_match = re.match(r'ad_cat_main_(.+)', data)
+    if ad_main_match:
+        main_cat = ad_main_match.group(1)
         cart['ad_data']['main_category'] = main_cat
         cart['ad_step'] = 'choose_sub_cat'
         await show_ad_category_selection(message, user_id, 'sub')
@@ -1531,10 +1534,10 @@ async def handle_callback(bot: Robot, message: Message):
         return
 
     # ----- انتخاب زیردسته برای ثبت -----
-    if data.startswith('ad_cat_sub_'):
-        parts = data.split('_', 4)
-        main_cat = parts[3]
-        sub_cat = parts[4]
+    ad_sub_match = re.match(r'ad_cat_sub_(.+?)_(.+)', data)
+    if ad_sub_match:
+        main_cat = ad_sub_match.group(1)
+        sub_cat = ad_sub_match.group(2)
         cart['ad_data']['main_category'] = main_cat
         cart['ad_data']['sub_category'] = sub_cat
         cart['ad_step'] = 'choose_leaf_cat'
@@ -1542,19 +1545,20 @@ async def handle_callback(bot: Robot, message: Message):
         return
 
     # ----- بازگشت به زیردسته در ثبت -----
-    if data.startswith('back_to_ad_sub_cat_'):
-        main_cat = data.replace('back_to_ad_sub_cat_', '')
+    back_ad_sub_match = re.match(r'back_to_ad_sub_cat_(.+)', data)
+    if back_ad_sub_match:
+        main_cat = back_ad_sub_match.group(1)
         cart['ad_data']['main_category'] = main_cat
         cart['ad_step'] = 'choose_sub_cat'
         await show_ad_category_selection(message, user_id, 'sub')
         return
 
     # ----- انتخاب برگ (آخرین سطح) برای ثبت -----
-    if data.startswith('ad_cat_leaf_'):
-        parts = data.split('_', 4)
-        main_cat = parts[3]
-        sub_cat = parts[4]
-        leaf = parts[5]
+    ad_leaf_match = re.match(r'ad_cat_leaf_(.+?)_(.+?)_(.+)', data)
+    if ad_leaf_match:
+        main_cat = ad_leaf_match.group(1)
+        sub_cat = ad_leaf_match.group(2)
+        leaf = ad_leaf_match.group(3)
         category_path = f"{main_cat}/{sub_cat}/{leaf}"
         cart['ad_data']['category_path'] = category_path
         cart['ad_step'] = 'enter_title'
