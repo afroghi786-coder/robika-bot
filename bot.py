@@ -885,63 +885,6 @@ async def handle_message(bot: Robot, message: Message):
     text = message.text if message.text else ''
     cart = get_cart(user_id)
 
-    # ========== پردازش عکس (برای ثبت آگهی) - اصلاح شده برای جلوگیری از AttributeError ==========
-    # بررسی وجود عکس با استفاده از getattr (برای جلوگیری از خطا در صورت نبود صفت)
-    photo_obj = getattr(message, 'photo', None)
-    document_obj = getattr(message, 'document', None)
-    media_obj = getattr(message, 'media', None)
-
-    # تابع کمکی برای استخراج file_id از هر نوع داده
-    def extract_file_id(obj):
-        if obj is None:
-            return None
-        # اگر شیء دارای attribute file_id باشد
-        if hasattr(obj, 'file_id'):
-            return obj.file_id
-        # اگر لیست باشد (مثلاً message.photo لیستی از سایزهای مختلف)
-        if isinstance(obj, list) and len(obj) > 0:
-            # معمولاً آخرین عنصر بزرگترین سایز است
-            return obj[-1].file_id if hasattr(obj[-1], 'file_id') else None
-        # اگر شیء media باشد (احتمالاً شامل type و file_id)
-        if hasattr(obj, 'type') and obj.type == 'photo' and hasattr(obj, 'file_id'):
-            return obj.file_id
-        return None
-
-    # تلاش برای یافتن file_id
-    file_id = None
-    if photo_obj:
-        file_id = extract_file_id(photo_obj)
-    elif document_obj and document_obj.mime_type and document_obj.mime_type.startswith('image/'):
-        file_id = extract_file_id(document_obj)
-    elif media_obj:
-        # اگر media لیست باشد
-        if isinstance(media_obj, list):
-            for item in media_obj:
-                if hasattr(item, 'type') and item.type == 'photo':
-                    file_id = extract_file_id(item)
-                    if file_id:
-                        break
-        else:
-            file_id = extract_file_id(media_obj)
-
-    if file_id:
-        # اگر در مرحله آپلود عکس هستیم
-        if cart.get('ad_step') == 'upload_photo':
-            os.makedirs('ad_images', exist_ok=True)
-            file_path = f"ad_images/{uuid.uuid4().hex}.jpg"
-            try:
-                await bot.download_file(file_id, file_path)
-                cart['ad_images'].append(file_path)
-                await message.reply(f"✅ تصویر {len(cart['ad_images'])} دریافت شد. تصویر دیگری ارسال کنید یا 'پایان' را بفرستید.")
-            except Exception as e:
-                logging.error(f"❌ خطا در ذخیره تصویر: {e}")
-                await message.reply(f"⚠️ خطا در ذخیره تصویر: {str(e)}. لطفاً دوباره تلاش کنید.")
-            return
-        else:
-            # اگر عکس ارسال شده ولی در مرحله آپلود نیستیم، پیام می‌دهیم
-            await message.reply("❌ لطفاً ابتدا ثبت آگهی را شروع کنید و در مرحله ارسال عکس باشید.")
-            return
-
     # ========== بخش کانال (ادمین) - خواندن محصولات ==========
     if chat_id.startswith('c0'):
         product = detect_product(text)
