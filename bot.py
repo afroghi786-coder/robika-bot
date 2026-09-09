@@ -409,7 +409,6 @@ async def show_products_page(message, user_id, bot):
         btn_text = f"{product['name'][:20]} - {format_price(product['price'])} تومان"
         keypad.row(ChatKeypadBuilder().button(id=f"select_{product['name']}", text=btn_text))
 
-    # دکمه‌های صفحه‌بندی
     nav_row = []
     if page > 1:
         nav_row.append(ChatKeypadBuilder().button(id="prev_page", text="⬅️ قبلی"))
@@ -886,29 +885,51 @@ async def handle_message(bot: Robot, message: Message):
     text = message.text if message.text else ''
     cart = get_cart(user_id)
 
-    # ========== پردازش عکس (برای ثبت آگهی) ==========
-    # ابتدا بررسی می‌کنیم که آیا عکس ارسال شده است
-    if message.photo:
-        logging.info(f"📸 عکس دریافت شد: {message.photo}")
+    # ========== پردازش عکس (برای ثبت آگهی) - اصلاح شده برای جلوگیری از AttributeError ==========
+    # بررسی وجود عکس با استفاده از getattr (برای جلوگیری از خطا در صورت نبود صفت)
+    photo_obj = getattr(message, 'photo', None)
+    document_obj = getattr(message, 'document', None)
+    media_obj = getattr(message, 'media', None)
+
+    # تابع کمکی برای استخراج file_id از هر نوع داده
+    def extract_file_id(obj):
+        if obj is None:
+            return None
+        # اگر شیء دارای attribute file_id باشد
+        if hasattr(obj, 'file_id'):
+            return obj.file_id
+        # اگر لیست باشد (مثلاً message.photo لیستی از سایزهای مختلف)
+        if isinstance(obj, list) and len(obj) > 0:
+            # معمولاً آخرین عنصر بزرگترین سایز است
+            return obj[-1].file_id if hasattr(obj[-1], 'file_id') else None
+        # اگر شیء media باشد (احتمالاً شامل type و file_id)
+        if hasattr(obj, 'type') and obj.type == 'photo' and hasattr(obj, 'file_id'):
+            return obj.file_id
+        return None
+
+    # تلاش برای یافتن file_id
+    file_id = None
+    if photo_obj:
+        file_id = extract_file_id(photo_obj)
+    elif document_obj and document_obj.mime_type and document_obj.mime_type.startswith('image/'):
+        file_id = extract_file_id(document_obj)
+    elif media_obj:
+        # اگر media لیست باشد
+        if isinstance(media_obj, list):
+            for item in media_obj:
+                if hasattr(item, 'type') and item.type == 'photo':
+                    file_id = extract_file_id(item)
+                    if file_id:
+                        break
+        else:
+            file_id = extract_file_id(media_obj)
+
+    if file_id:
+        # اگر در مرحله آپلود عکس هستیم
         if cart.get('ad_step') == 'upload_photo':
             os.makedirs('ad_images', exist_ok=True)
-            # در rubka، message.photo ممکن است یک شیء با attribute file_id باشد یا لیستی از اشیاء
+            file_path = f"ad_images/{uuid.uuid4().hex}.jpg"
             try:
-                # سعی می‌کنیم file_id را استخراج کنیم
-                if hasattr(message.photo, 'file_id'):
-                    file_id = message.photo.file_id
-                elif isinstance(message.photo, list) and len(message.photo) > 0:
-                    # اگر لیست است، معمولاً بزرگترین سایز را می‌گیریم
-                    file_id = message.photo[-1].file_id  # یا [0].file_id
-                else:
-                    file_id = None
-                
-                if not file_id:
-                    await message.reply("❌ خطا در دریافت شناسه تصویر. لطفاً دوباره ارسال کنید.")
-                    return
-                
-                file_path = f"ad_images/{uuid.uuid4().hex}.jpg"
-                # دانلود فایل
                 await bot.download_file(file_id, file_path)
                 cart['ad_images'].append(file_path)
                 await message.reply(f"✅ تصویر {len(cart['ad_images'])} دریافت شد. تصویر دیگری ارسال کنید یا 'پایان' را بفرستید.")
@@ -917,6 +938,7 @@ async def handle_message(bot: Robot, message: Message):
                 await message.reply(f"⚠️ خطا در ذخیره تصویر: {str(e)}. لطفاً دوباره تلاش کنید.")
             return
         else:
+            # اگر عکس ارسال شده ولی در مرحله آپلود نیستیم، پیام می‌دهیم
             await message.reply("❌ لطفاً ابتدا ثبت آگهی را شروع کنید و در مرحله ارسال عکس باشید.")
             return
 
@@ -1017,6 +1039,7 @@ async def handle_message(bot: Robot, message: Message):
                     await message.reply(summary)
                     return
                 else:
+                    # اگر کاربر در مرحله آپلود عکس است و متنی غیر از 'پایان' فرستاد، به او بگوییم عکس بفرستد.
                     await message.reply("❌ لطفاً یک تصویر ارسال کنید یا 'پایان' را بفرستید.")
                     return
 
