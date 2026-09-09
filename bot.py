@@ -166,7 +166,7 @@ def save_ads(ads):
 all_ads = load_ads()
 
 # ============================================================
-# 📂 مدیریت دسته‌بندی‌ها
+# 📂 مدیریت دسته‌بندی‌ها (برای آگهی‌ها)
 # ============================================================
 
 def load_categories():
@@ -883,17 +883,12 @@ async def handle_message(bot: Robot, message: Message):
     # ========== پردازش عکس (برای ثبت آگهی) ==========
     if message.photo:
         if cart.get('ad_step') == 'upload_photo':
-            # ذخیره تصویر
             os.makedirs('ad_images', exist_ok=True)
-            file_id = message.photo.file_id  # ممکن است نیاز به دریافت فایل واقعی باشد
-            # در Rubika، برای دریافت فایل باید از bot.download_file استفاده کرد.
-            # در اینجا فرض می‌کنیم که فایل قابل دانلود است.
+            file_id = message.photo.file_id
+            file_path = f"ad_images/{uuid.uuid4().hex}.jpg"
             try:
-                # دانلود فایل
-                file_path = f"ad_images/{uuid.uuid4().hex}.jpg"
-                # در Rubika متد دانلود: await bot.download_file(file_id, file_path)
-                # اما به دلیل محدودیت نمونه‌سازی، فقط نام فایل را ذخیره می‌کنیم.
-                # در عمل باید فایل واقعی دانلود شود.
+                # دانلود فایل با متد ربات
+                await bot.download_file(file_id, file_path)
                 cart['ad_images'].append(file_path)
                 await message.reply(f"✅ تصویر {len(cart['ad_images'])} دریافت شد. تصویر دیگری ارسال کنید یا 'پایان' را بفرستید.")
             except Exception as e:
@@ -901,7 +896,6 @@ async def handle_message(bot: Robot, message: Message):
                 logging.error(f"خطا در ذخیره تصویر: {e}")
             return
         else:
-            # اگر در مرحله آپلود عکس نباشیم، پیام می‌دهیم
             await message.reply("❌ لطفاً ابتدا ثبت آگهی را شروع کنید و در مرحله ارسال عکس باشید.")
             return
 
@@ -1087,7 +1081,7 @@ async def handle_message(bot: Robot, message: Message):
                         "description": ad_data.get('description', ''),
                         "price": ad_data.get('price', 0),
                         "pairCount": ad_data.get('pairCount', 0),
-                        "images": cart['ad_images'],  # لیست مسیر تصاویر
+                        "images": cart['ad_images'],
                         "contact_phone": ad_data.get('contact_phone', ''),
                         "status": "pending",
                         "created_at": datetime.now().isoformat()
@@ -1113,7 +1107,6 @@ async def handle_message(bot: Robot, message: Message):
                     await show_main_menu(message, user_id)
                     return
                 elif text.strip() == 'خیر':
-                    # بازگشت به مرحله ویرایش (برای سادگی، کل فرآیند را لغو می‌کنیم)
                     cart['ad_step'] = None
                     cart['ad_data'] = {}
                     cart['ad_images'] = []
@@ -1138,15 +1131,18 @@ async def handle_message(bot: Robot, message: Message):
                     return
                 ad['status'] = 'approved'
                 save_ads(all_ads)
+                # اضافه کردن به محصولات با دسته‌بندی قدیمی
                 if ad['type'] == 'product':
+                    category = detect_category(ad['title'])  # ← اصلاح مهم
                     new_product = {
                         'name': ad['title'],
                         'price': ad['price'],
                         'pairCount': ad.get('pairCount', 0),
-                        'category': ad['category_path'].split('/')[-1] if ad.get('category_path') else 'متفرقه'
+                        'category': category
                     }
                     all_products.append(new_product)
                     save_products(all_products)
+                # پیام به کاربر
                 try:
                     await bot.send_message(
                         chat_id=ad['seller_id'],
@@ -1562,7 +1558,7 @@ async def handle_callback(bot: Robot, message: Message):
         category_path = f"{main_cat}/{sub_cat}/{leaf}"
         cart['ad_data']['category_path'] = category_path
         cart['ad_step'] = 'enter_title'
-        await message.reply("📝 **عنوان آگهی** را وارد کنید:")  # <-- اصلاح: این خط اضافه شد
+        await message.reply("📝 **عنوان آگهی** را وارد کنید:")
         return
 
     # ========== دکمه نامعتبر ==========
